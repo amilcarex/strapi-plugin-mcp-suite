@@ -1,0 +1,50 @@
+{
+  "name": "strapi-plugin-mcp-suite",
+  "version": "0.3.0",
+  "description": "MCP server plugin for Strapi v5: generic content management, visual layout config, schema authoring, media uploads and GraphQL — with native API token auth, anti-impersonation and multi-layer rate limiting. Production-ready.",
+  "exports": {
+    "./strapi-server": "./dist/strapi-server.js",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.server.json",
+    "watch": "tsc -p tsconfig.server.json --watch",
+    "clean": "rimraf dist dist-tests",
+    "test": "tsc -p tsconfig.test.json && node --test --test-reporter=spec \"dist-tests/server/__tests__/*.test.js\"",
+    "test:watch": "tsc -p tsconfig.test.json --watch & node --test --watch \"dist-tests/server/__tests__/*.test.js\""
+  },
+  "strapi": {
+    "name": "strapi-plugin-mcp-suite",
+    "description": "MCP server for Strapi: schema authoring + content + layout + upload + graphql",
+    "kind": "plugin",
+    "displayName": "Strapi MCP Suite"
+  },
+  "keywords": [
+    "strapi",
+    "strapi-plugin",
+    "mcp",
+    "model-context-protocol",
+    "llm",
+    "claude",
+    "ai",
+    "content-management",
+    "schema-authoring",
+    "graphql"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amilcarex/strapi-plugin-mcp-suite.git"
+  },
+  "homepage": "https://github.com/amilcarex/strapi-plugin-mcp-suite#readme",
+  "bugs": {
+    "url": "https://github.com/amilcarex/strapi-plugin-mcp-suite/issues"
+  },
+  "peerDependencies": {
+    "@strapi/strapi": "^5.0.0"
+  },
+  "author": {
+    "name": "Amilcar Coronado",
+    "url": "https://github.com/amilcarex"
+  },
+  "license": "MIT"
+}
