@@ -15,5 +15,5 @@
     "rootDir": "."
   },
   "include": ["server", "server/**/*.json", "strapi-server.ts"],
-  "exclude": ["node_modules", "dist", "admin", "**/*.test.ts"]
+  "exclude": ["node_modules", "dist", "dist-tests", "admin", "**/*.test.ts", "server/__tests__/**"]
 }

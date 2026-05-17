@@ -1,0 +1,29 @@
+# Build outputs (regenerated on every install via prepublish)
+dist/
+dist-tests/
+
+# Dependencies
+node_modules/
+
+# TypeScript
+.tsbuildinfo
+*.tsbuildinfo
+
+# Plugin runtime artifacts
+.strapi-mcp-backups/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Env files (the plugin itself doesn't read .env, but contributors may have them)
+.env
+.env.local
+.env.*.local

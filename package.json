@@ -6,12 +6,22 @@
     "./strapi-server": "./dist/strapi-server.js",
     "./package.json": "./package.json"
   },
+  "files": [
+    "dist/",
+    "strapi-server.ts",
+    "package.json",
+    "README.md",
+    "README.es.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.server.json",
     "watch": "tsc -p tsconfig.server.json --watch",
-    "clean": "rimraf dist dist-tests",
+    "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('dist-tests',{recursive:true,force:true})\"",
     "test": "tsc -p tsconfig.test.json && node --test --test-reporter=spec \"dist-tests/server/__tests__/*.test.js\"",
-    "test:watch": "tsc -p tsconfig.test.json --watch & node --test --watch \"dist-tests/server/__tests__/*.test.js\""
+    "test:watch": "tsc -p tsconfig.test.json --watch & node --test --watch \"dist-tests/server/__tests__/*.test.js\"",
+    "prepublishOnly": "npm run clean && npm run build && npm test"
   },
   "strapi": {
     "name": "strapi-plugin-mcp-suite",
