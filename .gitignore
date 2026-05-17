@@ -27,3 +27,6 @@ pnpm-debug.log*
 .env
 .env.local
 .env.*.local
+
+# npm auth — NEVER commit. Use .npmrc.example as template.
+.npmrc

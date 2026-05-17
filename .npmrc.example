@@ -1,0 +1,17 @@
+# Plantilla del .npmrc local — copiala a .npmrc y reemplaza con tu token real.
+# .npmrc NUNCA debe committearse (ya está en .gitignore).
+#
+# Para publicar este package, necesitás un Granular Access Token de npmjs.com
+# con "Bypass two-factor authentication" activado.
+#
+# Pasos:
+#   1. Login a npmjs.com con tu cuenta
+#   2. Profile → Access Tokens → Generate New Token → Granular Access Token
+#   3. Marcá "Bypass 2FA", seleccioná el package strapi-plugin-mcp-suite con
+#      permiso Read and write, expiration 30 días.
+#   4. Copiá el token y reemplazalo abajo (empieza con npm_...)
+#   5. cp .npmrc.example .npmrc
+#   6. Editá .npmrc y poné tu token real.
+#   7. pnpm publish
+
+//registry.npmjs.org/:_authToken=npm_REPLACE_WITH_YOUR_TOKEN
