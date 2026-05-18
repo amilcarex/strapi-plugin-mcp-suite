@@ -27,9 +27,19 @@ export default ({ strapi }: { strapi: Core.Strapi }) => ({
     // para que las tools (especialmente graphql_query) puedan reusar el contexto
     // de auth en lugar de ejecutar con auth vacío (que bypasea permission checks
     // del plugin GraphQL).
+    //
+    // `request` propaga IP y user-agent al audit log (v0.4.0). `ctx.request.ip`
+    // resolves via Koa's proxy setting; behind a load balancer the operator
+    // should set `koa.proxy: true` for accurate values, but we don't enforce it.
+    const userAgent =
+      ctx.request?.headers?.["user-agent"] ?? ctx.request?.header?.["user-agent"] ?? "";
     const server = createMcpServer(strapi, {
       auth: ctx.state?.auth,
       user: ctx.state?.user,
+      request: {
+        ip: ctx.request?.ip,
+        userAgent: Array.isArray(userAgent) ? userAgent[0] : userAgent,
+      },
     });
 
     ctx.res.on("close", () => {

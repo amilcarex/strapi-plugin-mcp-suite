@@ -2,6 +2,25 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import type { Core } from "@strapi/strapi";
 
+import { registerTokenAuditHooks } from "./services/audit/hooks";
+import { runBackfill } from "./services/audit/backfill";
+import { startCleanupJob } from "./services/audit/cleanup";
+
+/**
+ * Handle on the periodic op-log cleanup job. Set in bootstrap, cleared in
+ * destroy. Module-scope so destroy.ts can import it via a getter.
+ */
+let auditCleanupHandle: NodeJS.Timeout | null = null;
+export function getAuditCleanupHandle(): NodeJS.Timeout | null {
+  return auditCleanupHandle;
+}
+export function clearAuditCleanupHandle(): void {
+  if (auditCleanupHandle) {
+    clearInterval(auditCleanupHandle);
+    auditCleanupHandle = null;
+  }
+}
+
 export default ({ strapi }: { strapi: Core.Strapi }) => {
   const authoring = process.env.SCHEMA_AUTHORING_ENABLED === "true";
   const upload = process.env.UPLOAD_ENABLED === "true";
@@ -30,10 +49,9 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
     (versionParts[0] < 5 || (versionParts[0] === 5 && versionParts[1] < 45));
   if (isOldVersion) {
     strapi.log.warn(
-      `[strapi-mcp] Strapi ${strapiVersion} es anterior a 5.45.0. El campo 'adminUserOwner' en api-tokens no existe, por lo que:\n` +
-      `  - createdBy/updatedBy NO se autopueblan (atribución por usuario deshabilitada).\n` +
-      `  - El check anti-impersonation de C2 no se aplica (no hay forma de verificar el dueño).\n` +
-      `  Las tools del MCP funcionan normal, pero recomendamos upgrade a >=5.45.0 para tener atribución y seguridad completa.`
+      `[strapi-mcp] Strapi ${strapiVersion} es anterior a 5.45.0. Soporte limitado pero funcional.\n` +
+      `  Para atribución completa (createdBy/updatedBy autopoblado en entries creados via MCP),\n` +
+      `  recomendamos upgrade a >=5.45.0 + activar 'features.future.adminTokens: true' en config/admin.ts.`
     );
   }
 
@@ -52,6 +70,37 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
       .catch(() => {
         // .gitignore no existe — proyecto no usa git, no warneamos
       });
+  }
+
+  // ── Audit trail (v0.4.0) ────────────────────────────────────────────────────
+  //
+  // 1. Register lifecycle hooks on admin::api-token so any future create/delete
+  //    is captured and the delete-permission rule is enforced.
+  // 2. Backfill audit rows for tokens that pre-date the install — without these
+  //    rows the beforeDelete hook treats them as unattributed legacy tokens,
+  //    which is the intended behavior but we want them in the audit table so
+  //    super-admins can see them via the __audit_token_creators tool.
+  // 3. Start the periodic op-log retention job (age + row cap).
+  //
+  // Hook registration is synchronous. Backfill + cleanup-tick are scheduled via
+  // setImmediate so they run after the project bootstrap completes (avoids
+  // racing with seed data loaders).
+  try {
+    registerTokenAuditHooks(strapi);
+  } catch (err) {
+    strapi.log.error(`[strapi-mcp audit] no pude registrar lifecycle hooks: ${String(err)}`);
+  }
+
+  setImmediate(() => {
+    runBackfill(strapi).catch((err) => {
+      strapi.log.error(`[strapi-mcp audit] backfill falló: ${String(err)}`);
+    });
+  });
+
+  try {
+    auditCleanupHandle = startCleanupJob(strapi);
+  } catch (err) {
+    strapi.log.error(`[strapi-mcp audit] no pude arrancar cleanup job: ${String(err)}`);
   }
 
   // Self-tests del registry de tools custom.

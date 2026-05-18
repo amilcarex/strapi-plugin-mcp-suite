@@ -103,32 +103,66 @@ export default async (
     );
   }
 
-  // ── Atribución por usuario, ANTI-IMPERSONATION ──────────────────────────────
+  // ── Enforcement granular del permiso del plugin ─────────────────────────────
   //
-  // Solo resolvemos el admin user cuando se cumplen LAS DOS condiciones:
-  //   1. El token tiene `adminUserOwner` poblado (Strapi v5.45+ lo registra
-  //      automáticamente al crear el token bajo la sesión de un admin).
-  //   2. Si el `name` del token contiene un email, ese email DEBE coincidir
-  //      con el email del `adminUserOwner`. Si no coincide, ignoramos el name
-  //      (anti-suplantación: un admin no puede nombrar su token con el email
-  //      de otro y atribuirle a otro las escrituras).
+  // Tipos de tokens en Strapi:
+  //   - "full-access": tiene acceso a TODO sin restricción → pasa siempre
+  //   - "read-only": tiene acceso a lecturas de toda la app → pasa (defensiva)
+  //   - "custom": solo tiene los permisos explícitamente marcados → debe tener
+  //     el permiso `plugin::strapi-mcp.stream.handle` (o el que Strapi haya
+  //     registrado para la ruta del MCP)
   //
-  // Si las condiciones no se cumplen, NO atribuimos: el token sigue siendo
-  // válido para auth, pero `ctx.state.user` queda sin setear y los entries
-  // creados quedan sin `createdBy`/`updatedBy`.
-  //
-  // CROSS-VERSION COMPAT: en Strapi <5.45 el campo `adminUserOwner` no existe
-  // en el schema de admin::api-token. El populate retorna undefined (o tira
-  // en versiones muy viejas que no toleran populates de relaciones inexistentes).
-  // En ese caso el plugin degrada a modo "no atribución" — auth válida pero
-  // los entries quedan sin createdBy/updatedBy. El bootstrap loguea un warning
-  // recomendando upgrade para tener anti-impersonation funcional.
-  let resolvedAdminUser: any = null;
-  const tokenName: string = (apiToken as any).name ?? "";
-  const emailMatch = tokenName.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/);
+  // Esto cierra el gap "alguien crea un token Custom marcando solo permisos
+  // sobre Articles, ese token NO debería poder usar el endpoint MCP".
+  // Sin este check, cualquier token válido pasaba — independientemente de
+  // los permisos marcados.
+  if (apiToken.type === "custom") {
+    const tokenWithPermissions = await strapi.db.query("admin::api-token").findOne({
+      where: { id: apiToken.id },
+      populate: { permissions: true },
+    });
+    const actions: string[] = ((tokenWithPermissions as any)?.permissions ?? [])
+      .map((p: any) => p.action)
+      .filter(Boolean);
 
-  // Recargar el token con adminUserOwner populated (el service no lo trae).
-  // Protegido con try/catch para versiones Strapi <5.45 donde el campo no existe.
+    // Strapi registra la ruta como acción del plugin con el patrón
+    // `plugin::<plugin-name>.<controller>.<action>`. Para este plugin:
+    // `plugin::strapi-mcp.stream.handle`. Si Strapi renombra los plugin names
+    // (ej: el dev configura el plugin con otro key), también aceptamos cualquier
+    // acción que matchee el patrón `plugin::*.stream.handle` para defensiva.
+    const hasMcpPermission = actions.some((action) =>
+      action === "plugin::strapi-mcp.stream.handle" ||
+      /^plugin::[\w-]+\.stream\.handle$/.test(action)
+    );
+
+    if (!hasMcpPermission) {
+      return rejectWith(
+        "Custom token missing MCP permission",
+        `El token "${apiToken.name}" es de tipo "custom" pero no tiene marcado el permiso del MCP. Para usarlo, edita el token en Settings → API Tokens → busca la sección "Strapi-mcp" (o como Strapi llame al plugin) y marca la acción "handle" bajo STREAM. Alternativa: cambia el token a type "Full access" o "Read-only".`
+      );
+    }
+  }
+
+  // ── Atribución por usuario (best-effort) ──────────────────────────────────
+  //
+  // Si el token tiene `adminUserOwner` populated, lo atribuimos a ctx.state.user
+  // para que Strapi autopueble createdBy/updatedBy en operaciones via
+  // strapi.documents(). Es best-effort: en Strapi 5.x con tokens content-api
+  // estándar (los que se crean desde Settings → API Tokens), adminUserOwner
+  // NUNCA está populated — el método create() del admin lo fuerza a null
+  // (ver @strapi/admin/dist/server/server/src/services/api-token.js:541).
+  //
+  // Solo los tokens kind='admin' tienen el owner populated, pero esos requieren
+  // activar la feature experimental `features.future.adminTokens: true` en
+  // config/admin.ts — no es algo que la mayoría de usuarios tenga.
+  //
+  // KNOWN LIMITATION: anti-impersonation basado en el email del token name
+  // (la idea: rechazar si el email del name no coincide con el adminUserOwner)
+  // NO es viable en Strapi 5.x estándar porque el owner casi nunca está
+  // populated. El plugin NO intenta ese check porque generaría falsa sensación
+  // de seguridad. Ver README sección "Known limitations" para detalles y
+  // cómo activar la future flag si necesitás atribución estricta.
+  let resolvedAdminUser: any = null;
   let owner: any = null;
   try {
     const tokenWithOwner = await strapi.db.query("admin::api-token").findOne({
@@ -138,41 +172,22 @@ export default async (
     owner = (tokenWithOwner as any)?.adminUserOwner ?? null;
   } catch (err) {
     // En Strapi <5.45 el populate de un campo inexistente puede tirar.
-    // Lo tratamos como "sin owner verificable" → no atribuir. Auth sigue OK.
+    // Degradamos silenciosamente a "sin atribución".
     owner = null;
   }
 
-  if (owner && emailMatch) {
-    const emailFromName = emailMatch[0].toLowerCase();
-    const ownerEmail = (owner.email ?? "").toLowerCase();
-
-    if (emailFromName !== ownerEmail) {
-      return rejectWith(
-        "Token name email mismatch",
-        `El email en el name del token ("${emailFromName}") no coincide con el del admin user dueño ("${ownerEmail}"). Por seguridad anti-suplantación, no se atribuye y se rechaza la request. Renombra el token con el email correcto, o quítale el email del name.`
-      );
-    }
-
+  if (owner) {
     if (owner.isActive === false || owner.blocked === true) {
       return rejectWith(
         "API token owner is inactive or blocked",
-        `El admin user dueño del token (${ownerEmail}) está desactivado o bloqueado. Pídele a un admin que lo reactive, o usa otro token.`
-      );
-    }
-
-    resolvedAdminUser = owner;
-  } else if (owner && !emailMatch) {
-    // Token con dueño legítimo pero sin email en el name: atribución permitida
-    // sin requerir match. Esto preserva tokens "de servicio" creados por un admin.
-    if (owner.isActive === false || owner.blocked === true) {
-      return rejectWith(
-        "API token owner is inactive or blocked",
-        `El admin user dueño del token está desactivado o bloqueado.`
+        `El admin user dueño del token está desactivado o bloqueado. Pide a un admin que lo reactive, o usa otro token.`
       );
     }
     resolvedAdminUser = owner;
   }
-  // Token sin adminUserOwner (legacy o de servicio): no atribuye. Auth válida igual.
+  // Sin owner: no atribuye, auth sigue válida. Caso default en Strapi 5.x
+  // con tokens content-api. Los entries creados via MCP quedan sin
+  // createdBy/updatedBy. Aceptable trade-off documentado.
 
   ctx.state = ctx.state ?? {};
   ctx.state.auth = {

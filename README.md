@@ -1,7 +1,7 @@
 # strapi-plugin-mcp-suite
 
 > **Model Context Protocol server for Strapi v5**
-> Expose your Strapi instance to LLM clients (Claude, Cursor, any MCP-compatible) for generic content management, visual layout configuration, schema authoring, media uploads and GraphQL testing — with native Strapi API token auth, anti-impersonation and multi-layer rate limiting.
+> Expose your Strapi instance to LLM clients (Claude, Cursor, any MCP-compatible) for generic content management, visual layout configuration, schema authoring, media uploads and GraphQL testing — with native Strapi API token auth, multi-layer rate limiting and a forensic audit trail for every operation.
 
 🇪🇸 [Leer en español](./README.es.md)
 
@@ -11,13 +11,13 @@
 
 Drop this plugin into any Strapi v5 project, create an API token, point your MCP client at `/api/strapi-mcp/stream`. Your LLM can now read/write entries, reorganize admin UI layouts, generate components and content-types (opt-in), upload media (opt-in) and execute GraphQL queries (opt-in) — all through native Strapi APIs (`strapi.documents()`, lifecycle hooks, validation, draft & publish).
 
-The plugin ships with hardened defaults: path traversal blocking, SSRF protection (AWS IMDS / RFC1918 / DNS rebinding), token anti-impersonation, rate limiting in 3 layers (per-token / per-user / per-IP) and a fail-closed production mode for schema authoring.
+The plugin ships with hardened defaults: path traversal blocking, SSRF protection (AWS IMDS / RFC1918 / DNS rebinding), rate limiting in 3 layers (per-token / per-user / per-IP), a fail-closed production mode for schema authoring, and a forensic audit trail (token lifecycle + every operation) with delete-permission enforcement on tokens.
 
 ---
 
 ## Features
 
-### Built-in tools (31 total, organized by capability)
+### Built-in tools (33 total, organized by capability)
 
 | Category | Tools | Notes |
 |---|---|---|
@@ -27,6 +27,7 @@ The plugin ships with hardened defaults: path traversal blocking, SSRF protectio
 | **Media / upload** | `list_media`, `get_media`, `upload_media_from_url`, `update_media_metadata`, `delete_media`, `link_media_to_entry` | URL-based uploads. Works with any Strapi provider (local, S3, Cloudinary, R2, etc.). **Gated by `UPLOAD_ENABLED=true`.** SSRF-protected. |
 | **GraphQL** | `graphql_introspect`, `graphql_query`, `graphql_generate_query` | Test GraphQL queries, introspect the schema, generate queries from a content-type UID. Mutations require explicit `allow_mutations:true`. **Gated by `GRAPHQL_ENABLED=true`** and requires `@strapi/plugin-graphql` installed. |
 | **Diagnostics** | `__health`, `__list_registered_tools` | Health ping (use after schema-authoring to confirm Strapi restarted) + registry inventory. Always available. |
+| **Audit** | `__audit_token_creators`, `__audit_log_query` | Read-only views over the forensic audit tables (who created each token, every tool invocation with redacted args). **Requires super-admin.** Always exposed but always denies non-super-admin callers. |
 
 ### Extensibility
 
@@ -173,6 +174,9 @@ All configuration is via environment variables. See `.env.example` in the repo r
 | `UPLOAD_URL_ALLOWED_DOMAIN_SUFFIXES` | (empty) | Same as above but matches domain suffixes (e.g. `.amazonaws.com`). |
 | `UPLOAD_URL_EXTRA_BLOCKED_HOSTS` | (empty) | Additional hosts to block (extends the hardcoded blocklist). |
 | `UPLOAD_URL_EXTRA_BLOCKED_CIDRS` | (empty) | Additional IPv4 CIDR ranges to block. |
+| `MCP_AUDIT_RETENTION_DAYS` | `90` | `op-log` rows older than this are deleted. `0` disables the age pass. |
+| `MCP_AUDIT_MAX_ROWS` | `100000` | Cap on `op-log` rows. Oldest are trimmed first. `0` disables the cap. |
+| `MCP_AUDIT_CLEANUP_INTERVAL_HOURS` | `24` | How often the cleanup job runs. Minimum `1`. |
 
 ---
 
@@ -180,11 +184,11 @@ All configuration is via environment variables. See `.env.example` in the repo r
 
 The plugin is designed assuming the LLM is **untrusted input** — prompt injection, poisoning, or jailbreak could turn it into an adversary. Defenses:
 
-### Authentication & attribution
+### Authentication & granular permissions
 
 - **Native Strapi API tokens** — no custom auth scheme to break. Reuses Strapi's hashing and storage.
-- **Anti-impersonation (Strapi 5.45+)** — if the token name contains an email, it must match the email of the `adminUserOwner` of the token. Prevents low-priv users from naming their token `ceo@company.com - ...` to attribute writes to the CEO.
-- **Graceful degradation on Strapi <5.45** — `adminUserOwner` doesn't exist; the plugin doesn't attribute (no false trust) and logs a warning on boot suggesting upgrade.
+- **Granular permission enforcement** — Custom tokens must have `plugin::strapi-mcp.stream.handle` explicitly marked. Tokens of type `Custom` without the MCP permission marked are rejected with `401 Custom token missing MCP permission`. `Full Access` and `Read Only` tokens pass by design (broader scope).
+- **Best-effort attribution** — if the token has `adminUserOwner` populated (only happens for `kind='admin'` tokens with the experimental `features.future.adminTokens` flag), the plugin attributes `createdBy`/`updatedBy` on entries. For standard `content-api` tokens, attribution is null (see [Known limitations](#known-limitations)).
 
 ### Path traversal (schema authoring)
 
@@ -219,9 +223,48 @@ Each layer is a sliding window. Any layer hitting its limit returns `429` with `
 - GraphQL mutations require explicit `allow_mutations: true` per call.
 - Destructive operations (`delete_*`) require `confirm: true`.
 
+### Audit trail (v0.4.0)
+
+The plugin maintains two internal tables (hidden from Content Manager and Content-Type Builder, not exposed via REST/GraphQL):
+
+- **`mcp_token_audits`** — one row per API token. Captures `creator_id`, `creator_email`, `created_at_real`, and on deletion `deleter_id`, `deleter_email`, `deleted_at`. Tokens that existed before the plugin was installed are backfilled with `creator_email='unknown'` and `is_legacy=true`.
+- **`mcp_op_logs`** — one row per `tools/call` over the MCP endpoint. Captures: `tool_name`, `status` (ok/error), `duration_ms`, `token_id`, `admin_user_id`, `admin_email`, `ip`, `user_agent`, `args_redacted` (args with secret-shaped keys replaced by `[REDACTED]`), `result_summary` (small extraction — `documentId`, `count`, `uid` — **never** the full payload), and `error_message` for failures.
+
+**Delete-permission enforcement on `admin::api-token`:** a `beforeDelete` lifecycle hook blocks deletion unless the caller is the original creator OR a super-admin. Legacy tokens require super-admin. The deletion itself is recorded by `afterDelete`, so even authorized deletions leave a trace.
+
+**Retention:** `op-log` is bounded by both an age window (`MCP_AUDIT_RETENTION_DAYS`, default 90) and a row cap (`MCP_AUDIT_MAX_ROWS`, default 100k). A cleanup job runs every `MCP_AUDIT_CLEANUP_INTERVAL_HOURS` (default 24) in batches of 1000. Setting either limit to `0` disables that pass — useful for tests, not recommended in production.
+
+**Querying the audit:**
+
+```jsonc
+// Tool: __audit_token_creators
+// Args: { include_deleted?: boolean = true, limit?: number (cap 500) }
+// Returns: { count, tokens: [{token_id, token_name, token_type, creator_id, creator_email, created_at, deleter_id?, deleter_email?, deleted_at?, is_legacy}] }
+
+// Tool: __audit_log_query
+// Args: { token_id?, admin_user_id?, tool_name?, status?, since? (ISO), until? (ISO), limit?, include_payloads?: boolean = false }
+// Returns: { count, filters, include_payloads, rows: [...] }
+```
+
+**Both tools require a super-admin caller.** Since standard `content-api` tokens have no admin user resolved (see [Known limitations](#known-limitations)), invoking these tools in practice requires:
+1. Strapi 5.45+ with `features.future.adminTokens: true` in `config/admin.ts`.
+2. A token created from a super-admin session (so `adminUserOwner` populates with that user).
+
+If your setup doesn't meet those conditions, you can still query the tables directly via SQL — the data is captured regardless of whether the introspection tools are usable. Example:
+
+```sql
+SELECT tool_name, status, duration_ms, admin_email, ip, ts
+FROM mcp_op_logs
+WHERE ts > datetime('now', '-1 day')
+ORDER BY ts DESC
+LIMIT 100;
+```
+
+**What the audit does NOT do:** it does not *prevent* impersonation — that's structurally impossible in standard Strapi 5.x (see Known limitations). It provides **forensic evidence** so an incident can be reconstructed after the fact, and it raises the cost of "delete the evidence then deny" since the delete itself is logged.
+
 ### What this plugin does NOT protect against
 
-- **Compromise of the Strapi admin user that creates tokens** — out of scope; if the admin is compromised, the attacker can create tokens anyway.
+- **Compromise of the Strapi admin user that creates tokens** — out of scope; if the admin is compromised, the attacker can create tokens anyway. The audit will record the creation under that user, which helps post-incident.
 - **Egress firewall bypass** — if your server can reach `169.254.169.254`, the plugin blocks but ideally your VPC also blocks. Defense in depth.
 - **Distributed attacks across multiple instances** — rate limit is in-memory per instance. Use a CDN/proxy or Redis backend for cluster-wide limits.
 
@@ -326,17 +369,52 @@ The security test exercises 18+ regression cases for C1 (path traversal), C3 (SS
 | Schema authoring fails with `SCHEMA_AUTHORING_DISABLED_IN_PRODUCTION` even in dev | `NODE_ENV` not set | Explicitly set `NODE_ENV=development` in your `.env` |
 | `Tool "graphql_query" no encontrada` | `GRAPHQL_ENABLED=false` or `@strapi/plugin-graphql` not installed | Enable + install the plugin |
 | Behind a CDN/proxy, per-IP rate limit triggers immediately | All requests appear to come from the proxy IP | Set `proxy: true` in `config/server.ts` |
+| `403 [strapi-mcp audit] Delete bloqueado` when deleting an API token | Caller is not the original creator and not super-admin | Log in as the creator or as a super-admin. If the token is legacy (created before v0.4.0), only super-admin can delete it. |
+| `__audit_token_creators` returns `AUDIT_REQUIRES_SUPER_ADMIN` | Token has no admin user resolved (standard content-api tokens) | Activate `features.future.adminTokens: true` in `config/admin.ts` and create the audit-query token from a super-admin session; or query the `mcp_token_audits` / `mcp_op_logs` tables directly via SQL. |
 
 ---
 
+## Known limitations
+
+### Anti-impersonation via `adminUserOwner` is not implemented
+
+An earlier security audit identified a scenario: if a user with permission to create API tokens names their token `"ceo@company.com - mcp"`, all writes via that token would be attributed to the CEO via the email-in-token-name convention. The initial fix in 0.3.0 tried to mitigate this by verifying the token's `adminUserOwner` field against the email in the name.
+
+**Investigation in 0.3.1 revealed the mitigation is not feasible** in standard Strapi 5.x. The `adminUserOwner` field is only populated for tokens of `kind='admin'` (a feature gated behind `features.future.adminTokens: true` in `config/admin.ts` — experimental, not enabled by default). Standard `content-api` tokens (the ones created from `Settings → API Tokens`) have `adminUserOwner` forced to `null` by Strapi's admin service ([see source](https://github.com/strapi/strapi/blob/main/packages/core/admin/server/src/services/api-token.ts)).
+
+The check was removed in 0.3.1 because keeping it would generate false confidence — for the vast majority of users, the policy would degrade to "no attribution" anyway without rejecting impostor tokens.
+
+**Workarounds if you need strict attribution per user:**
+
+1. **Activate the experimental flag** in `config/admin.ts`:
+   ```ts
+   features: {
+     future: { adminTokens: true }
+   }
+   ```
+   Then create tokens via the `/admin/admin-tokens` REST endpoint (not the UI). Those tokens have `adminUserOwner` populated and the plugin attributes correctly.
+
+2. **Enforce token naming convention via process**: have a policy where developers MUST include their own email in tokens they create. Audit token names periodically against admin user roster. This is process-based, not technical.
+
+3. **Wait for Strapi to stabilize the feature**: when `adminTokens` graduates from "future" to a stable API, the plugin can rely on it for all installations.
+
+### Other known limitations
+
+- Rate limit is in-memory per instance. Multi-instance setups behind a load balancer don't share counters. Use a CDN/proxy rate limit or Redis backend (planned for future release).
+- Schema authoring requires Strapi restart to take effect. The plugin tells the LLM to wait via `restart_info`, but cannot eliminate the restart itself (Strapi loads schemas in boot).
+- GraphQL tools depend on `@strapi/plugin-graphql` being installed and `GRAPHQL_ENABLED=true`. If absent, tools are not exposed.
+
 ## Roadmap
 
-- [ ] npm publish under `@<scope>/strapi-plugin-mcp-suite`
-- [ ] Strapi marketplace submission
+- [x] npm publish: [strapi-plugin-mcp-suite](https://www.npmjs.com/package/strapi-plugin-mcp-suite)
+- [x] Forensic audit trail (token lifecycle + operations) — v0.4.0
+- [ ] Strapi marketplace approval
 - [ ] Redis backend for rate limiting (multi-instance support)
+- [ ] Admin UI panel for browsing the audit log
 - [ ] Token rotation hooks
 - [ ] More i18n-specific tools (`clone_entry_to_locale`, `list_locales`)
 - [ ] `delete_content_type` with multi-step confirmation
+- [ ] Re-implement anti-impersonation when Strapi stabilizes `adminTokens` future flag
 
 ---
 
