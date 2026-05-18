@@ -1,7 +1,7 @@
 {
   "name": "strapi-plugin-mcp-suite",
-  "version": "0.3.0",
-  "description": "MCP server plugin for Strapi v5: generic content management, visual layout config, schema authoring, media uploads and GraphQL — with native API token auth, anti-impersonation and multi-layer rate limiting. Production-ready.",
+  "version": "0.4.0",
+  "description": "MCP server plugin for Strapi v5: generic content management, visual layout config, schema authoring, media uploads and GraphQL — with native API token auth, multi-layer rate limiting and a forensic audit trail (token lifecycle + every operation). Production-ready.",
   "exports": {
     "./strapi-server": "./dist/strapi-server.js",
     "./package.json": "./package.json"

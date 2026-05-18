@@ -5,11 +5,61 @@ All notable changes to `strapi-plugin-mcp` are documented here. Format follows [
 ## [Unreleased]
 
 ### Planned
-- npm publish
-- Strapi marketplace submission
 - Redis backend for multi-instance rate limiting
 - `delete_content_type` with multi-step confirmation
 - i18n-specific tools
+- Admin UI panel for browsing the audit log
+
+## [0.4.0] - 2026-05-18
+
+### Security
+
+- **Added: forensic audit trail.** Two new internal content-types (`plugin::strapi-mcp.token-audit`, `plugin::strapi-mcp.op-log`) record:
+  - **Token lifecycle** — who created each API token, when, and (if deleted) who deleted it. Captured via lifecycle hooks on `admin::api-token` (`afterCreate`, `afterDelete`). Pre-existing tokens are backfilled at boot with `creator=unknown, is_legacy=true`.
+  - **Tool invocations** — every `tools/call` over the MCP endpoint writes a row with: token id, admin user (if attributable), tool name, args (with secret-shaped keys like `token`/`password`/`apiKey` redacted), result summary (small extraction: `documentId`/`count`/`uid`), status (ok/error), error message, duration, IP, user-agent. Full payloads are NEVER persisted.
+- **Added: delete-permission enforcement on `admin::api-token`.** A `beforeDelete` lifecycle hook blocks token deletion unless the caller is (a) the original creator recorded in `token-audit`, OR (b) a super-admin. Legacy tokens (no recorded creator) require super-admin. Returns `403 ForbiddenError` with `details.reason: MCP_AUDIT_DELETE_FORBIDDEN`.
+- **Added: bounded retention for `op-log`.** Default 90 days OR 100k rows (configurable via `MCP_AUDIT_RETENTION_DAYS`, `MCP_AUDIT_MAX_ROWS`). Cleanup runs every `MCP_AUDIT_CLEANUP_INTERVAL_HOURS` (default 24) in batches of 1000. Setting either limit to `0` disables that pass (useful for tests).
+
+### Added
+
+- **2 new tools (super-admin only):**
+  - `__audit_token_creators` — list who created each token, plus deletion info if applicable. Useful for spotting legacy tokens that need attention.
+  - `__audit_log_query` — filterable view of `op-log` (by token_id, admin_user_id, tool_name, status, ts range). By default omits `args_redacted` and `result_summary` (`include_payloads: true` to include them). Cap 500 rows.
+- **Audit hidden from Content Manager and Content-Type Builder** via `pluginOptions.visible: false` — the two tables are operator-only.
+- **40 new unit tests** covering: redactor (depth limit, key matching, nested), summarizer, lifecycle hooks (create/delete-permission/post-delete), backfill (idempotency, error isolation), cleanup (age + cap passes, env var off-switch), logger (failure isolation), audit tools (super-admin gating, filter building).
+- 3 new env vars: `MCP_AUDIT_RETENTION_DAYS`, `MCP_AUDIT_MAX_ROWS`, `MCP_AUDIT_CLEANUP_INTERVAL_HOURS`.
+
+### Changed
+
+- `mcp-server.ts` wraps every tool invocation in audit instrumentation (start timestamp → handler → log either result_summary or error_message). Logging failures are swallowed; they never break the tool itself.
+- `controllers/stream.ts` propagates request IP and user-agent into the MCP context for the audit row.
+- Internal `version` field in `createMcpServer` bumped to `0.4.0`.
+
+### Documentation
+
+- New README section "Audit trail" (EN + ES) explaining: the two tables, the delete-permission rule, the retention model, when super-admin attribution actually works (Strapi 5.45+ with `features.future.adminTokens: true`), and the trade-offs vs. the abandoned anti-impersonation attempt.
+- `.env.example` expanded with the 3 new env vars + commentary on tuning.
+
+### Notes
+
+The audit system does NOT prevent impersonation — that's structurally impossible in standard Strapi 5.x (see 0.3.1 entry). What it gives you is **forensic evidence**: if an incident happens, you can trace which token did what, when, and who created that token. Combined with the delete-permission rule, it raises the cost of post-incident cleanup ("delete the evidence then deny") — the deletion attempt is itself recorded by the `afterDelete` hook.
+
+## [0.3.1] - 2026-05-18
+
+### Security
+
+- **Added: granular permission enforcement for Custom API tokens.** The policy `require-api-token` now verifies that Custom tokens have the action `plugin::strapi-mcp.stream.handle` explicitly marked. Tokens of type `Custom` without the MCP permission marked are rejected with `401 Custom token missing MCP permission`. `Full Access` and `Read Only` tokens continue to pass (their scope is broader by design). This closes the gap where any valid token could use the endpoint regardless of its declared permissions.
+
+### Removed (with explanation)
+
+- **Removed: anti-impersonation check via `adminUserOwner` field.** Investigation revealed that Strapi 5.x forces `adminUserOwner: null` for all `content-api` tokens (the ones users create from `Settings → API Tokens`) — see [@strapi/admin's api-token service line 541](https://github.com/strapi/strapi/blob/main/packages/core/admin/server/src/services/api-token.ts). The field is only populated for tokens of `kind='admin'`, which require enabling the experimental feature flag `features.future.adminTokens: true` in `config/admin.ts`. Since the check could not actually protect against the C2 impersonation scenario for the vast majority of users, it was generating false confidence. Removed entirely. See README's "Known limitations" section for details and how to enable strict attribution if you control your deployment.
+
+### Documentation
+
+- Added `Known limitations` section to README (EN + ES) covering: (1) why C2 anti-impersonation cannot be implemented reliably in Strapi 5.x standard, (2) workaround using `kind='admin'` tokens behind feature flag.
+- CHANGELOG entry detailing the security audit finding that led to removal.
+
+## [0.3.0] - 2026-05-17
 
 ## [0.3.0] - 2026-05-17
 

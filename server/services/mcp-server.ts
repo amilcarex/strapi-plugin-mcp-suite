@@ -13,6 +13,8 @@ import { registryTools } from "./tools/registry-tools";
 import { healthTools } from "./tools/health-tools";
 import { uploadTools } from "./tools/upload-tools";
 import { graphqlTools } from "./tools/graphql-tools";
+import { auditTools } from "./tools/audit-tools";
+import { logOperation } from "./audit/logger";
 
 /**
  * Construye una instancia MCP Server con las tools registradas.
@@ -36,13 +38,21 @@ import { graphqlTools } from "./tools/graphql-tools";
 export interface McpServerContext {
   auth?: any;
   user?: any;
+  /**
+   * Request metadata propagated from the HTTP controller for audit logging.
+   * `ip` and `userAgent` are written to `op-log` rows.
+   */
+  request?: {
+    ip?: string;
+    userAgent?: string;
+  };
 }
 
 export function createMcpServer(strapi: Core.Strapi, ctx: McpServerContext = {}) {
   const server = new Server(
     {
       name: "strapi-mcp",
-      version: "0.2.0",
+      version: "0.4.0",
     },
     {
       capabilities: { tools: {} },
@@ -61,6 +71,7 @@ export function createMcpServer(strapi: Core.Strapi, ctx: McpServerContext = {})
   tools.push(...layoutOpsTools);
   tools.push(...registryTools);
   tools.push(...healthTools);
+  tools.push(...auditTools);
 
   // Upload tools: opt-in.
   if (process.env.UPLOAD_ENABLED === "true") {
@@ -102,15 +113,45 @@ export function createMcpServer(strapi: Core.Strapi, ctx: McpServerContext = {})
       );
     }
 
+    // Audit log instrumentation (v0.4.0). Runs around the handler; never
+    // throws on its own bookkeeping failures. The handler's outcome — success
+    // or thrown error — is captured and persisted to op-log via logOperation.
+    const startedAt = Date.now();
+    const apiToken = ctx.auth?.credentials ?? null;
+    let logged = false;
+
     try {
       const result = await tool.handler(
         { strapi, auth: ctx.auth, user: ctx.user },
         (args ?? {}) as any
       );
+      logged = true;
+      logOperation(strapi, {
+        toolName: name,
+        args: args ?? {},
+        result,
+        status: "ok",
+        durationMs: Date.now() - startedAt,
+        apiToken,
+        user: ctx.user,
+        request: ctx.request,
+      }).catch(() => undefined);
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       };
     } catch (err) {
+      if (!logged) {
+        logOperation(strapi, {
+          toolName: name,
+          args: args ?? {},
+          error: err,
+          status: "error",
+          durationMs: Date.now() - startedAt,
+          apiToken,
+          user: ctx.user,
+          request: ctx.request,
+        }).catch(() => undefined);
+      }
       const message = err instanceof Error ? err.message : String(err);
       const details = (err as any)?.details;
       return {
