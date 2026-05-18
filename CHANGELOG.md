@@ -4,11 +4,59 @@ All notable changes to `strapi-plugin-mcp` are documented here. Format follows [
 
 ## [Unreleased]
 
-### Planned
+### Planned for v0.5.1 — Restraints on destructive ops
+- `delete_field_from_schema` requires `confirm: true` (parity with `delete_entry`). Forces the LLM to surface the deletion to the user instead of silently fixing unrelated problems by deleting fields.
+- Hardened descriptions on all destructive tools: "USE ONLY when the user explicitly named this for deletion. Do NOT delete to fix unrelated problems."
+- Audit log: `destructive: true` flag on `delete_*` op rows for easy forensic filtering.
+
+### Planned for v0.5.2 — Proactive atomization
+- New tool `suggest_reusable_atoms({ scope?: 'all' | 'component_uid' })`. Walks the live component+CT catalog, counts repeated field patterns (e.g. "`title: string` appears in 8 sections", "`icon: string` appears in 4 molecules"), and proposes a promotion plan: create a new flat atom (`atoms.heading`, `atoms.icon`, etc.) + replace usages + migrate data. Closes the gap where the LLM defaults to "add more fields" instead of "extract a reusable atom".
+
+### Planned for v0.6.0+
 - Redis backend for multi-instance rate limiting
 - `delete_content_type` with multi-step confirmation
 - i18n-specific tools
 - Admin UI panel for browsing the audit log
+- Extend `strategy` resolution to `create_content_type` and `add_field_to_schema`
+- `flatten_now` tool to migrate existing schemas
+
+## [0.5.0] - 2026-05-18
+
+### Added
+
+- **Deep populate on reads (opt-in).** `find_entries` and `get_entry` accept `populate_deep: true` and `populate_depth: N` (default `4`, hard cap `6`). When enabled, the plugin auto-generates the full populate tree from the live schema — relations, components, dynamiczones, media — with a `visited` Set guarding against cyclic relations. Eliminates the need for the LLM to hand-craft the populate object for deeply nested content. Algorithm ported from the inline `populate-deep` pattern in the Alegra repo.
+  - Backward compatible: `populate_deep` defaults to `false`. Existing calls passing `populate` keep their current behavior.
+  - If both `populate_deep: true` and `populate` are passed, `populate` is ignored and the response carries a `warning` field explaining why.
+- **Progressive schema strategies on writes.** When `create_component` receives a proposal that would exceed Strapi's UI depth limit (1 level of component nesting → `NESTED_COMPONENT_DEPTH_EXCEEDED`), the response now includes a `strategies` array instead of just an error. Each strategy describes a concrete way to materialize the LLM's intent:
+  - **`flat`** — auto-inlines the nested component's attributes into the parent with a `${attr}_` prefix. Refused when the parent attribute is `repeatable: true` (semantically wrong to flatten 1:N) or when the prefixed names would collide with existing attributes.
+  - **`modular`** — keeps the components separate. The parent is written without the offending nested reference; the LLM gets `wiring_instructions` with the exact JSON snippet the user must paste into the parent CT/component schema by hand. Always available.
+  - **`dynamiczone`** — marked unavailable for component proposals (dynzones only live in content-types) with an explanation pointing the user to the right escape hatch.
+  - **`as-proposed`** (escape hatch) — writes the component EXACTLY as proposed, preserving the depth chain. The CTB UI will refuse to open the resulting component for editing, but Strapi's backend (DB, REST, GraphQL, lifecycle, populate) handles deeper nesting fine. For users who know the constraint and prefer JSON-only editing for that schema. Bypasses the warning-confirmation gate (the strategy choice itself is the confirmation).
+  Re-call `create_component` with `strategy: 'flat' | 'modular' | 'dynamiczone' | 'as-proposed'` to materialize the chosen option. Validation is re-run on the materialized schema before writing.
+- **New tool `propose_schema_strategy`** — read-only dry-run of the strategies pipeline. Accepts a proposed component schema, returns the violations and (if applicable) the strategies. Never writes. Useful for the LLM to explore options before committing.
+- **New tool `add_fields_to_schema`** (batch) — adds N attributes to an existing schema in a single read-modify-write cycle → a single Strapi restart instead of N. Atomic: if any field collides (within the batch or against existing attributes) the entire operation aborts without writing. Reduces the friction of adding multiple fields sequentially (which was previously ~N×12s of restart overhead with brittle inter-call coordination). The singular `add_field_to_schema` is now documented as "single-field convenience"; the batch is preferred when adding 2+ fields.
+- **50 new unit tests** (3 files): `deep-populate.test.ts` (19 cases for walker correctness, cycle protection, dynzone syntax), `strategies.test.ts` (13 cases for flatten + propose + as-proposed), `tools-schema-authoring.test.ts` (11 integration cases for create_component strategy fork + propose_schema_strategy + add_fields_to_schema pre-flight), plus extension of `tools-content-ops.test.ts` (7 cases for populate_deep integration). Total: **267/267 passing**.
+
+### Changed
+
+- `__health` reports the correct plugin version (was hardcoded to 0.2.0).
+- `restart_info.retry_strategy` and `next_action_for_llm` updated to mention the mcp-remote reconnection cap (Claude Desktop bridge) and to point users at `add_fields_to_schema` batch as a way to minimize restart cycles.
+- `find_entries.inputSchema` and `get_entry.inputSchema` gain `populate_deep` (boolean) and `populate_depth` (integer 1-6).
+- `create_component.inputSchema` gains optional `strategy: 'flat' | 'modular' | 'dynamiczone' | 'as-proposed'`.
+- `add_field_to_schema` description updated: "⚠️ Si necesitas agregar VARIOS campos, usá `add_fields_to_schema` (plural, batch) que aplica N campos en un solo restart."
+- Internal `version` field in `createMcpServer` bumped to `0.5.0` (cosmetic).
+
+### Documentation
+
+- New README section "Deep population on reads" (EN + ES) explaining when to use `populate_deep`, the depth cap, and the trade-offs.
+- New README section "Schema strategies on writes" (EN + ES) explaining the three strategies, when each applies, and the two-call flow (propose → choose → materialize).
+- `.env.example` unchanged — both features are per-call, no env vars added.
+
+### Notes
+
+- Strategies are currently scoped to `create_component`. `create_content_type` and `add_field_to_schema` will get strategy support in a future release (the validator currently only flags depth violations for component proposals).
+- The deep-populate walker treats system models (`admin::user`, `plugin::users-permissions.*`) as shallow (`populate: true`) — those trees are large and rarely useful to fetch in full from an MCP.
+- The depth cap of `6` is heuristic. Combined with the existing `pageSize` cap of `200`, the worst-case query is bounded to ~200 entries × 6 branching levels. If you hit timeouts in production, raise the cap conservatively or restrict via `filters`.
 
 ## [0.4.0] - 2026-05-18
 
