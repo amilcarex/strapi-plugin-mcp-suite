@@ -349,3 +349,5 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md).
 ## License
 
 [MIT](./LICENSE) — Amilcar Coronado, 2026.
+ 
+ 
