@@ -41,6 +41,10 @@ export default {
       duration_ms: { type: "integer" },
       ip: { type: "string" },
       user_agent: { type: "string" },
+      // v0.6.0: true when tool_name is a destructive operation (delete_*).
+      // Lets a super-admin filter the forensic log for the high-risk ops fast:
+      //   SELECT * FROM mcp_op_logs WHERE destructive = 1 ORDER BY ts DESC
+      destructive: { type: "boolean", default: false },
     },
   },
 };

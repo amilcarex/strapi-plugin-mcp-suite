@@ -336,3 +336,240 @@ describe("propose_schema_strategy — read-only dry run", () => {
     assert.deepEqual(result.strategies, []);
   });
 });
+
+// ── modify_schema (batch remove + add + update, v0.6.0) ───────────────────────
+
+describe("modify_schema — pre-flight conflict detection (no fs)", () => {
+  test("todas las listas vacías → error", async () => {
+    const strapi = makeMockStrapi();
+    const tool = getTool("modify_schema");
+    await assert.rejects(
+      tool.handler({ strapi: strapi as any }, { uid: "molecules.x" } as any),
+      /al menos una operaci/i
+    );
+  });
+
+  test("duplicado en remove[] → error", async () => {
+    const strapi = makeMockStrapi();
+    const tool = getTool("modify_schema");
+    await assert.rejects(
+      tool.handler(
+        { strapi: strapi as any },
+        { uid: "molecules.x", remove: ["a", "b", "a"] } as any
+      ),
+      /"a" duplicado en remove/i
+    );
+  });
+
+  test("duplicado en add[] → error", async () => {
+    const strapi = makeMockStrapi();
+    const tool = getTool("modify_schema");
+    await assert.rejects(
+      tool.handler(
+        { strapi: strapi as any },
+        {
+          uid: "molecules.x",
+          add: [
+            { field_name: "f", field: { type: "string" } },
+            { field_name: "f", field: { type: "text" } },
+          ],
+        } as any
+      ),
+      /"f" duplicado en add/i
+    );
+  });
+
+  test("campo en remove[] y add[] a la vez → error (sugiere update)", async () => {
+    const strapi = makeMockStrapi();
+    const tool = getTool("modify_schema");
+    await assert.rejects(
+      tool.handler(
+        { strapi: strapi as any },
+        {
+          uid: "molecules.x",
+          remove: ["title"],
+          add: [{ field_name: "title", field: { type: "string" } }],
+        } as any
+      ),
+      /remove\[\] y add\[\] a la vez.*update/i
+    );
+  });
+
+  test("campo en remove[] y update[] a la vez → error", async () => {
+    const strapi = makeMockStrapi();
+    const tool = getTool("modify_schema");
+    await assert.rejects(
+      tool.handler(
+        { strapi: strapi as any },
+        {
+          uid: "molecules.x",
+          remove: ["title"],
+          update: [{ field_name: "title", field: { type: "string" } }],
+        } as any
+      ),
+      /remove\[\] y update\[\] a la vez/i
+    );
+  });
+
+  test("campo en add[] y update[] a la vez → error", async () => {
+    const strapi = makeMockStrapi();
+    const tool = getTool("modify_schema");
+    await assert.rejects(
+      tool.handler(
+        { strapi: strapi as any },
+        {
+          uid: "molecules.x",
+          add: [{ field_name: "title", field: { type: "string" } }],
+          update: [{ field_name: "title", field: { type: "text" } }],
+        } as any
+      ),
+      /add\[\] y update\[\] a la vez/i
+    );
+  });
+});
+
+describe("modify_schema — fs-backed operations", () => {
+  // Fixture: a real component schema file the tool will read + rewrite.
+  const fs = require("node:fs") as typeof import("node:fs");
+  const path = require("node:path") as typeof import("node:path");
+  const fixtureDir = path.join(process.cwd(), "src", "components", "molecules");
+  const fixturePath = path.join(fixtureDir, "zz-modify-test.json");
+  const backupsDir = path.join(process.cwd(), ".strapi-mcp-backups");
+
+  const baseSchema = {
+    collectionName: "components_molecules_zz_modify_tests",
+    info: { displayName: "ZZ Modify Test" },
+    attributes: {
+      title: { type: "string", required: true },
+      legacy: { type: "text" },
+      count: { type: "integer" },
+    },
+  };
+
+  beforeEach(() => {
+    fs.mkdirSync(fixtureDir, { recursive: true });
+    fs.writeFileSync(fixturePath, JSON.stringify(baseSchema, null, 2) + "\n");
+  });
+  afterEach(() => {
+    try { fs.rmSync(fixturePath, { force: true }); } catch {}
+    try { fs.rmSync(backupsDir, { recursive: true, force: true }); } catch {}
+  });
+
+  function strapiForFixture() {
+    return makeMockStrapi({
+      components: { "molecules.zz-modify-test": { attributes: baseSchema.attributes } },
+    });
+  }
+
+  test("remove + add + update combinados en 1 escritura", async () => {
+    const tool = getTool("modify_schema");
+    const result: any = await tool.handler(
+      { strapi: strapiForFixture() as any },
+      {
+        uid: "molecules.zz-modify-test",
+        remove: ["legacy"],
+        update: [{ field_name: "count", field: { type: "biginteger" } }],
+        add: [{ field_name: "slug", field: { type: "uid", targetField: "title" } }],
+      } as any
+    );
+    assert.equal(result.success, true);
+    assert.deepEqual(result.operations, { removed: ["legacy"], updated: ["count"], added: ["slug"] });
+
+    const written = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+    assert.equal(written.attributes.legacy, undefined, "legacy eliminado");
+    assert.equal(written.attributes.count.type, "biginteger", "count actualizado");
+    assert.equal(written.attributes.slug.type, "uid", "slug agregado");
+    assert.equal(written.attributes.title.type, "string", "title intacto");
+  });
+
+  test("update cambia el type de un campo existente (text → string)", async () => {
+    const tool = getTool("modify_schema");
+    const result: any = await tool.handler(
+      { strapi: strapiForFixture() as any },
+      {
+        uid: "molecules.zz-modify-test",
+        update: [{ field_name: "legacy", field: { type: "string" } }],
+      } as any
+    );
+    assert.equal(result.success, true);
+    const written = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+    assert.equal(written.attributes.legacy.type, "string");
+  });
+
+  test("remove de campo inexistente → error, no escribe", async () => {
+    const tool = getTool("modify_schema");
+    await assert.rejects(
+      tool.handler(
+        { strapi: strapiForFixture() as any },
+        { uid: "molecules.zz-modify-test", remove: ["ghost"] } as any
+      ),
+      /"ghost" no existe/i
+    );
+    const untouched = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+    assert.ok(untouched.attributes.title, "schema sin cambios");
+  });
+
+  test("add de campo que ya existe → error", async () => {
+    const tool = getTool("modify_schema");
+    await assert.rejects(
+      tool.handler(
+        { strapi: strapiForFixture() as any },
+        {
+          uid: "molecules.zz-modify-test",
+          add: [{ field_name: "title", field: { type: "string" } }],
+        } as any
+      ),
+      /"title" ya existe/i
+    );
+  });
+
+  test("update de campo inexistente → error", async () => {
+    const tool = getTool("modify_schema");
+    await assert.rejects(
+      tool.handler(
+        { strapi: strapiForFixture() as any },
+        {
+          uid: "molecules.zz-modify-test",
+          update: [{ field_name: "ghost", field: { type: "string" } }],
+        } as any
+      ),
+      /"ghost" no existe/i
+    );
+  });
+
+  test("remove + add del MISMO nombre vía 2 ops separadas funciona (recrear campo)", async () => {
+    // remove 'legacy' y add 'legacy' nuevo con otro type — permitido porque
+    // el add chequea "existe Y no está en remove".
+    const tool = getTool("modify_schema");
+    const result: any = await tool.handler(
+      { strapi: strapiForFixture() as any },
+      {
+        uid: "molecules.zz-modify-test",
+        remove: ["legacy"],
+        add: [{ field_name: "legacy_v2", field: { type: "string" } }],
+      } as any
+    );
+    assert.equal(result.success, true);
+    const written = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+    assert.equal(written.attributes.legacy, undefined);
+    assert.equal(written.attributes.legacy_v2.type, "string");
+  });
+
+  test("dry_run no escribe pero devuelve operations + files_to_write", async () => {
+    const tool = getTool("modify_schema");
+    const result: any = await tool.handler(
+      { strapi: strapiForFixture() as any },
+      {
+        uid: "molecules.zz-modify-test",
+        remove: ["count"],
+        dry_run: true,
+      } as any
+    );
+    assert.equal(result.dry_run, true);
+    assert.ok(result.files_to_write);
+    assert.deepEqual(result.operations.removed, ["count"]);
+    // El archivo en disco NO debe haber cambiado.
+    const onDisk = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+    assert.ok(onDisk.attributes.count, "count sigue en disco (dry_run)");
+  });
+});

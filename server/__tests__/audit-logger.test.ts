@@ -116,3 +116,29 @@ describe("logOperation — duration clamp", () => {
     assert.equal(data.duration_ms, 0);
   });
 });
+
+describe("logOperation — destructive flag (v0.6.0)", () => {
+  const destructiveOk = ["delete_entry", "delete_field_from_schema", "delete_media"];
+  for (const tool of destructiveOk) {
+    test(`${tool} → destructive=true`, async () => {
+      const { strapi, dbCalls } = buildAuditMockStrapi();
+      await logOperation(strapi, { toolName: tool, args: {}, status: "ok", durationMs: 1 });
+      const data = (dbCalls.find((c) => c.uid === OP_LOG && c.op === "create") as any).data;
+      assert.equal(data.destructive, true);
+    });
+  }
+
+  test("tool no destructiva → destructive=false", async () => {
+    const { strapi, dbCalls } = buildAuditMockStrapi();
+    await logOperation(strapi, { toolName: "find_entries", args: {}, status: "ok", durationMs: 1 });
+    const data = (dbCalls.find((c) => c.uid === OP_LOG && c.op === "create") as any).data;
+    assert.equal(data.destructive, false);
+  });
+
+  test("modify_schema NO se marca destructive (puede borrar campos pero requiere remove[] explícito)", async () => {
+    const { strapi, dbCalls } = buildAuditMockStrapi();
+    await logOperation(strapi, { toolName: "modify_schema", args: {}, status: "ok", durationMs: 1 });
+    const data = (dbCalls.find((c) => c.uid === OP_LOG && c.op === "create") as any).data;
+    assert.equal(data.destructive, false);
+  });
+});

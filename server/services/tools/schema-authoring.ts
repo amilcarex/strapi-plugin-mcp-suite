@@ -24,11 +24,59 @@ import {
   applyStrategyToProposal,
   type StrategyName,
 } from "../schema-authoring/strategies";
+import { suggestReusableAtoms } from "../atoms/suggest-atoms";
 
 const VALID_STRATEGY_NAMES = ["flat", "modular", "dynamiczone", "as-proposed"] as const;
 
 function hasErrors(v: ValidationResult): boolean {
   return v.violations.some((x) => x.severity === "error");
+}
+
+/**
+ * Resolves the absolute schema.json path for a content-type UID (api::*) or a
+ * component UID (category.name). Shared by add/delete/modify tools.
+ */
+function resolveSchemaPath(uid: string): string {
+  const isComponent = !uid.startsWith("api::");
+  return isComponent
+    ? pathsForComponent(uid.split(".")[0], uid.split(".")[1])[0].path
+    : pathsForContentType(uid.replace(/^api::/, "").split(".")[0]).schema;
+}
+
+/**
+ * Scans every content-type and component for relations that point AT
+ * `uid.fieldName` via inversedBy/mappedBy. Returns the blockers — deleting a
+ * field that another schema's relation depends on would leave a dangling
+ * reciprocal. Reused by delete_field_from_schema and modify_schema.
+ */
+function findRelationBlockers(
+  strapi: any,
+  uid: string,
+  fieldName: string
+): { from: string; via: string; reason: string }[] {
+  const blockers: { from: string; via: string; reason: string }[] = [];
+  const scan = (uidFrom: string, attrs: any) => {
+    for (const [n, a] of Object.entries<any>(attrs ?? {})) {
+      if (
+        a?.type === "relation" &&
+        a.target === uid &&
+        (a.inversedBy === fieldName || a.mappedBy === fieldName)
+      ) {
+        blockers.push({
+          from: uidFrom,
+          via: n,
+          reason: `tiene ${a.inversedBy ? "inversedBy" : "mappedBy"}="${fieldName}"`,
+        });
+      }
+    }
+  };
+  for (const [otherUid, ct] of Object.entries<any>(strapi.contentTypes ?? {})) {
+    if (otherUid !== uid) scan(otherUid, (ct as any).attributes);
+  }
+  for (const [otherUid, comp] of Object.entries<any>(strapi.components ?? {})) {
+    if (otherUid !== uid) scan(otherUid, (comp as any).attributes);
+  }
+  return blockers;
 }
 
 function buildAuthoringResponse(
@@ -637,7 +685,7 @@ export const schemaAuthoringTools: ToolDefinition[] = [
   {
     name: "delete_field_from_schema",
     description:
-      "Elimina un atributo de un schema existente. REFUSA si el atributo es referenciado desde otro schema vía inversedBy/mappedBy (te avisa cuál y cómo desconectarlo primero). DISPARA RESTART DE STRAPI (dev mode) — el endpoint MCP estará caído ~12s. Mira `restart_info` en la respuesta y espera ese tiempo; usa `__health` para confirmar que volvió. Hace backup .bak.{timestamp} antes de borrar.",
+      "⚠️ DESTRUCTIVA. Elimina un atributo de un schema existente. USA ESTA TOOL SOLO cuando el usuario nombró EXPLÍCITAMENTE el campo a eliminar. NO la uses para 'arreglar' un problema no relacionado (ej. un error de profundidad) eliminando campos por tu cuenta — eso destruye trabajo deliberado del usuario; en ese caso, presentale el conflicto y dejá que decida. REFUSA si el atributo es referenciado desde otro schema vía inversedBy/mappedBy (te avisa cuál y cómo desconectarlo primero). DISPARA RESTART DE STRAPI (dev mode) — el endpoint MCP estará caído ~12s. Mira `restart_info` en la respuesta y espera ese tiempo; usa `__health` para confirmar que volvió. Hace backup .bak.{timestamp} antes de borrar.",
     inputSchema: {
       type: "object",
       properties: {
@@ -784,6 +832,233 @@ export const schemaAuthoringTools: ToolDefinition[] = [
           "Para materializar una strategy, llama a create_component con `strategy: 'flat'` (o 'modular', 'dynamiczone').",
         ],
       };
+    },
+  },
+
+  // ── 10. modify_schema (BATCH remove + add + update) ─────────────────────────
+  {
+    name: "modify_schema",
+    description:
+      "BATCH atómico de modificaciones de schema: combina remove[] (borrar campos), add[] (agregar campos nuevos) y update[] (reemplazar la definición de campos existentes — ej. cambiar el type) en UNA sola escritura → UN SOLO restart de Strapi. Reemplaza tener que encadenar delete_field_from_schema + add_fields_to_schema (que serían N restarts). Lee el schema una vez, aplica remove → update → add, valida el resultado completo, escribe. Si CUALQUIER operación falla (campo inexistente, colisión, relación bloqueante, validation error) toda la operación se aborta sin escribir nada. DISPARA UN SOLO RESTART (~12s).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        uid: { type: "string", description: "UID del schema (api::* o category.name)." },
+        remove: {
+          type: "array",
+          items: { type: "string" },
+          description: "Nombres de atributos a eliminar. Cada uno debe existir. Refusa si un atributo está referenciado por inversedBy/mappedBy de otro schema.",
+        },
+        add: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              field_name: { type: "string" },
+              field: { type: "object", description: "Definición del atributo (type, required, etc.)." },
+            },
+            required: ["field_name", "field"],
+            additionalProperties: false,
+          },
+          description: "Atributos nuevos a agregar. Cada field_name NO debe existir (salvo que esté en remove[]).",
+        },
+        update: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              field_name: { type: "string" },
+              field: { type: "object", description: "Nueva definición completa del atributo (reemplaza la anterior)." },
+            },
+            required: ["field_name", "field"],
+            additionalProperties: false,
+          },
+          description: "Atributos existentes a reemplazar. Cada field_name DEBE existir. Útil para cambiar el type de un campo (ej. text → string) sin orquestar delete+add.",
+        },
+        dry_run: { type: "boolean", default: false },
+        force: { type: "boolean", default: false, description: "Suprime warnings (no errors)." },
+        backup: { type: "boolean", default: true },
+      },
+      required: ["uid"],
+      additionalProperties: false,
+    },
+    handler: async ({ strapi }, args: any) => {
+      if (isProduction()) productionRefusal();
+
+      const remove: string[] = Array.isArray(args.remove) ? args.remove : [];
+      const add: { field_name: string; field: any }[] = Array.isArray(args.add) ? args.add : [];
+      const update: { field_name: string; field: any }[] = Array.isArray(args.update) ? args.update : [];
+
+      if (remove.length === 0 && add.length === 0 && update.length === 0) {
+        throw new Error(
+          "modify_schema requiere al menos una operación: remove[], add[] o update[]. Todas vacías."
+        );
+      }
+
+      // ── Pre-flight: detectar conflictos entre las 3 listas (sin tocar fs) ──
+      const removeSet = new Set(remove);
+      const addNames = add.map((a) => a.field_name);
+      const updateNames = update.map((u) => u.field_name);
+
+      const dup = (arr: string[]) => arr.find((n, i) => arr.indexOf(n) !== i);
+      const removeDup = dup(remove);
+      if (removeDup) throw new Error(`"${removeDup}" duplicado en remove[].`);
+      const addDup = dup(addNames);
+      if (addDup) throw new Error(`"${addDup}" duplicado en add[].`);
+      const updateDup = dup(updateNames);
+      if (updateDup) throw new Error(`"${updateDup}" duplicado en update[].`);
+
+      for (const n of addNames) {
+        if (removeSet.has(n)) {
+          throw new Error(
+            `"${n}" está en remove[] y add[] a la vez. Para cambiar la definición de un campo existente usá update[], no remove+add.`
+          );
+        }
+        if (updateNames.includes(n)) {
+          throw new Error(`"${n}" está en add[] y update[] a la vez. Elegí una.`);
+        }
+      }
+      for (const n of updateNames) {
+        if (removeSet.has(n)) {
+          throw new Error(`"${n}" está en remove[] y update[] a la vez. Elegí una.`);
+        }
+      }
+
+      const isComponent = !args.uid.startsWith("api::");
+      const sourcePath = resolveSchemaPath(args.uid);
+
+      const release = await acquirePathLock(sourcePath);
+      try {
+        let schema: any;
+        try {
+          schema = await readJson(sourcePath);
+        } catch (err) {
+          throw new Error(`No pude leer schema.json en ${sourcePath}: ${(err as Error).message}`);
+        }
+
+        const attrs: Record<string, any> = { ...(schema.attributes ?? {}) };
+
+        // ── Validar remove[]: cada campo existe + no tiene blockers ──
+        const allBlockers: any[] = [];
+        for (const name of remove) {
+          if (!(name in attrs)) {
+            throw new Error(`remove[]: el atributo "${name}" no existe en "${args.uid}".`);
+          }
+          const blockers = findRelationBlockers(strapi, args.uid, name);
+          for (const b of blockers) allBlockers.push({ field: name, ...b });
+        }
+        if (allBlockers.length > 0) {
+          return {
+            success: false,
+            refused: true,
+            reason: `${allBlockers.length} atributo(s) en remove[] están referenciados por relaciones de otros schemas. Quitá esas referencias primero.`,
+            blockers: allBlockers,
+            restart_required: false,
+          };
+        }
+
+        // ── Validar update[]: cada campo existe ──
+        for (const { field_name } of update) {
+          if (!(field_name in attrs)) {
+            throw new Error(
+              `update[]: el atributo "${field_name}" no existe en "${args.uid}". Para crear uno nuevo usá add[].`
+            );
+          }
+        }
+
+        // ── Validar add[]: cada campo NO existe (salvo que esté en remove) ──
+        for (const { field_name } of add) {
+          const existsAndNotRemoved = field_name in attrs && !removeSet.has(field_name);
+          if (existsAndNotRemoved) {
+            throw new Error(
+              `add[]: el atributo "${field_name}" ya existe en "${args.uid}". Usá update[] para reemplazarlo, o ponelo en remove[] si querés recrearlo.`
+            );
+          }
+        }
+
+        // ── Aplicar en orden: remove → update → add ──
+        for (const name of remove) delete attrs[name];
+        for (const { field_name, field } of update) attrs[field_name] = field;
+        for (const { field_name, field } of add) attrs[field_name] = field;
+        schema.attributes = attrs;
+
+        const validation = validateSchemaProposal(
+          strapi,
+          { uid: args.uid, kind: isComponent ? "component" : "content-type", schema },
+          "update"
+        );
+
+        if (hasErrors(validation)) {
+          return { success: false, validation, restart_required: false };
+        }
+        if (validation.warnings.length > 0 && !args.force) {
+          return {
+            success: false,
+            validation,
+            hint: "Hay warnings. Revisalas y volvé a llamar con force=true si querés escribir igual.",
+            restart_required: false,
+          };
+        }
+
+        const files: FileToWrite[] = [
+          { path: sourcePath, content: JSON.stringify(schema, null, 2) + "\n" },
+        ];
+        const opSummary = {
+          removed: remove,
+          updated: updateNames,
+          added: addNames,
+        };
+
+        if (args.dry_run) {
+          return {
+            dry_run: true,
+            validation,
+            files_to_write: files,
+            operations: opSummary,
+            restart_required: true,
+            restart_info: buildRestartInfo(),
+          };
+        }
+
+        const writeResult = await writeFiles(files, { backup: args.backup ?? true });
+        return buildAuthoringResponse(validation, writeResult, {
+          uid: args.uid,
+          operations: opSummary,
+        });
+      } finally {
+        release();
+      }
+    },
+  },
+
+  // ── 11. suggest_reusable_atoms (read-only analysis) ─────────────────────────
+  {
+    name: "suggest_reusable_atoms",
+    description:
+      "Analiza TODOS los components y content-types del proyecto buscando campos escalares repetidos (ej. 'title: string' en 8 sections) que valdría la pena promover a atoms reutilizables. Para cada candidato fuerte devuelve: dónde se usa, un schema starter del atom propuesto, y un execution_plan concreto (create_component + un modify_schema por consumidor) que podés ejecutar tras revisión. NO escribe nada — es análisis puro. Cierra el gap donde el LLM por default 'agrega más campos sueltos' en vez de 'extraer un átomo reutilizable'.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        scope: {
+          type: "string",
+          enum: ["all", "components", "content-types"],
+          default: "all",
+          description: "Qué analizar. 'all' incluye components + content-types api::*.",
+        },
+        min_occurrences: {
+          type: "integer",
+          minimum: 2,
+          default: 3,
+          description: "Cuántas veces tiene que repetirse un patrón (field_name + type) para considerarse candidato.",
+        },
+      },
+      additionalProperties: false,
+    },
+    handler: async ({ strapi }, args: any) => {
+      return suggestReusableAtoms(strapi, {
+        scope: args?.scope ?? "all",
+        minOccurrences: args?.min_occurrences,
+      });
     },
   },
 ];

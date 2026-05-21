@@ -265,7 +265,7 @@ export const uploadTools: ToolDefinition[] = [
   // ── 5. delete_media ─────────────────────────────────────────────────────────
   {
     name: "delete_media",
-    description: "Elimina un archivo del media library Y del provider configurado (S3, etc.). REQUIERE confirm:true. Operación destructiva — el provider borra el archivo físico también.",
+    description: "⚠️ DESTRUCTIVA. Elimina un archivo del media library Y del provider configurado (S3, etc.). REQUIERE confirm:true. El provider borra el archivo físico también — es irreversible. USA ESTA TOOL SOLO cuando el usuario nombró explícitamente el archivo a eliminar; no la uses para 'limpiar' por tu cuenta.",
     inputSchema: {
       type: "object",
       properties: {

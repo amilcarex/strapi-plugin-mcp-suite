@@ -446,6 +446,35 @@ Atomic: if any field collides (within the batch or against existing attributes),
 
 **Note**: Strategy support currently lives in `create_component` only. `create_content_type` and `add_field_to_schema` will get the same fork in a future release.
 
+### Full schema mutation in one restart: `modify_schema` (v0.6.0)
+
+`modify_schema` is the most powerful schema tool — it combines **remove + add + update** into one atomic write → **a single Strapi restart** instead of N:
+
+```jsonc
+{
+  "uid": "molecules.feature-item",
+  "remove": ["legacy_field"],
+  "update": [{ "field_name": "count", "field": { "type": "biginteger" } }],
+  "add":    [{ "field_name": "slug",  "field": { "type": "uid", "targetField": "title" } }]
+}
+```
+
+- `remove[]` — field names to delete (refuses if a relation in another schema depends on them via `inversedBy`/`mappedBy`)
+- `update[]` — replace a field's full definition. The way to change a field's `type` (e.g. `text → string`) without orchestrating delete-then-add.
+- `add[]` — new fields (collision-checked)
+
+Applied in order `remove → update → add`, validated as a whole, written once. Any failure aborts everything — no partial states. Cross-list conflicts (a name in both `remove` and `add`, duplicates, etc.) are caught before the filesystem is touched.
+
+### Proactive atomization: `suggest_reusable_atoms` (v0.6.0)
+
+Read-only analysis tool. Walks every component and content-type, counts repeated `(fieldName, type)` patterns, and flags scalar fields worth promoting to reusable atom components — the classic case of `title: string` copy-pasted into 8 sections.
+
+```jsonc
+{ "scope": "all", "min_occurrences": 3 }
+```
+
+For each strong candidate it returns the `used_in` list, a **starter atom schema** (with built-in enrichment for known names — `title → atoms.heading` with tag/align, `icon → atoms.icon` with size/color), and an `execution_plan` of concrete `create_component` + `modify_schema` calls you can run after review. It also surfaces depth warnings (when a consumer is itself nested) and a data-migration note. Never writes.
+
 ## Known limitations
 
 ### Schema-authoring chains can hang Claude Desktop via mcp-remote
