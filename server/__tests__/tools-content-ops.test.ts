@@ -170,3 +170,147 @@ describe("content-ops: publish/unpublish requiere D&P", () => {
     assert.equal(result.success, true);
   });
 });
+
+// ── populate_deep (v0.5.0) ────────────────────────────────────────────────────
+
+describe("content-ops: find_entries populate_deep", () => {
+  function buildStrapiWithPage() {
+    const captured: { query: any | null } = { query: null };
+    const strapi = makeMockStrapi({
+      contentTypes: {
+        "api::page.page": {
+          attributes: {
+            title: { type: "string" },
+            cover: { type: "media" },
+            hero: { type: "component", component: "sections.hero" },
+          },
+        },
+      },
+      components: {
+        "sections.hero": { attributes: { headline: { type: "string" }, image: { type: "media" } } },
+      },
+      documentsImpl: () => ({
+        findMany: async (q: any) => {
+          captured.query = q;
+          return [];
+        },
+        count: async () => 0,
+      }),
+    });
+    return { strapi, captured };
+  }
+
+  test("populate_deep=true genera el tree y lo pasa a findMany", async () => {
+    const { strapi, captured } = buildStrapiWithPage();
+    const tool = getTool("find_entries");
+    await tool.handler(
+      { strapi: strapi as any },
+      { uid: "api::page.page", populate_deep: true, populate_depth: 4 } as any
+    );
+    assert.ok(captured.query.populate, "populate debe ser objeto, no undefined");
+    assert.equal(captured.query.populate.cover, true);
+    assert.deepEqual(captured.query.populate.hero, { populate: { image: true } });
+  });
+
+  test("populate_deep=true ignora populate del LLM y emite warning", async () => {
+    const { strapi, captured } = buildStrapiWithPage();
+    const tool = getTool("find_entries");
+    const result: any = await tool.handler(
+      { strapi: strapi as any },
+      {
+        uid: "api::page.page",
+        populate_deep: true,
+        populate: "*",
+      } as any
+    );
+    assert.ok(captured.query.populate, "debe usar el tree generado, no '*'");
+    assert.notEqual(captured.query.populate, "*");
+    assert.ok(result.warning, "debe emitir warning");
+    assert.match(result.warning, /populate.*ignor/i);
+  });
+
+  test("populate_deep=false (default) pasa populate del LLM tal cual", async () => {
+    const { strapi, captured } = buildStrapiWithPage();
+    const tool = getTool("find_entries");
+    await tool.handler(
+      { strapi: strapi as any },
+      { uid: "api::page.page", populate: "*" } as any
+    );
+    assert.equal(captured.query.populate, "*");
+  });
+
+  test("populate_deep=false sin populate no agrega populate al query", async () => {
+    const { strapi, captured } = buildStrapiWithPage();
+    const tool = getTool("find_entries");
+    await tool.handler(
+      { strapi: strapi as any },
+      { uid: "api::page.page" } as any
+    );
+    assert.equal(captured.query.populate, undefined);
+  });
+
+  test("populate_depth fuera de rango se clampa (defensa contra bypass del schema)", async () => {
+    const { strapi, captured } = buildStrapiWithPage();
+    const tool = getTool("find_entries");
+    // depth=99 — el JSON schema lo rechazaría, pero el clamp interno lo capa a 6
+    await tool.handler(
+      { strapi: strapi as any },
+      { uid: "api::page.page", populate_deep: true, populate_depth: 99 } as any
+    );
+    assert.ok(captured.query.populate, "debe generar tree aunque depth esté fuera de rango");
+    // No tiramos error — la defensa es clampear, no rechazar
+  });
+});
+
+describe("content-ops: get_entry populate_deep", () => {
+  test("populate_deep=true genera tree para findOne", async () => {
+    const captured: { query: any | null } = { query: null };
+    const strapi = makeMockStrapi({
+      contentTypes: {
+        "api::article.article": {
+          attributes: {
+            title: { type: "string" },
+            cover: { type: "media" },
+          },
+        },
+      },
+      documentsImpl: () => ({
+        findOne: async (q: any) => {
+          captured.query = q;
+          return { documentId: "x", title: "test" };
+        },
+      }),
+    });
+    const tool = getTool("get_entry");
+    const result: any = await tool.handler(
+      { strapi: strapi as any },
+      {
+        uid: "api::article.article",
+        documentId: "x",
+        populate_deep: true,
+      } as any
+    );
+    assert.ok(captured.query.populate);
+    assert.equal(captured.query.populate.cover, true);
+    assert.equal(result.documentId, "x");
+  });
+
+  test("get_entry sin populate_deep usa el populate del LLM", async () => {
+    const captured: { query: any | null } = { query: null };
+    const strapi = makeMockStrapi({
+      contentTypes: { "api::article.article": { attributes: {} } },
+      documentsImpl: () => ({
+        findOne: async (q: any) => {
+          captured.query = q;
+          return { documentId: "x" };
+        },
+      }),
+    });
+    const tool = getTool("get_entry");
+    await tool.handler(
+      { strapi: strapi as any },
+      { uid: "api::article.article", documentId: "x", populate: "*" } as any
+    );
+    assert.equal(captured.query.populate, "*");
+  });
+});

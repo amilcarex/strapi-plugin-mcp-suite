@@ -19,6 +19,13 @@ import {
   type FileToWrite,
 } from "../schema-authoring/writer";
 import { acquirePathLock } from "../path-lock";
+import {
+  proposeSchemaStrategies,
+  applyStrategyToProposal,
+  type StrategyName,
+} from "../schema-authoring/strategies";
+
+const VALID_STRATEGY_NAMES = ["flat", "modular", "dynamiczone", "as-proposed"] as const;
 
 function hasErrors(v: ValidationResult): boolean {
   return v.violations.some((x) => x.severity === "error");
@@ -160,7 +167,7 @@ export const schemaAuthoringTools: ToolDefinition[] = [
   {
     name: "create_component",
     description:
-      "Crea un component nuevo escribiendo src/components/{category}/{name}.json. DISPARA RESTART DE STRAPI (dev mode) — el endpoint MCP estará caído ~12s. La respuesta incluye `restart_info` con el tiempo estimado; espera ese período antes de la próxima llamada al MCP. Usa la tool `__health` para verificar que Strapi volvió. Valida la propuesta automáticamente — abortado si hay violations (a menos que force=true para warnings). Usa dry_run=true para ver qué se escribiría sin escribir.",
+      "Crea un component nuevo escribiendo src/components/{category}/{name}.json. DISPARA RESTART DE STRAPI (dev mode) — el endpoint MCP estará caído ~12s. La respuesta incluye `restart_info` con el tiempo estimado; espera ese período antes de la próxima llamada al MCP. Usa la tool `__health` para verificar que Strapi volvió. Valida la propuesta automáticamente — abortado si hay violations (a menos que force=true para warnings). Usa dry_run=true para ver qué se escribiría sin escribir. Si la propuesta excede el límite de profundidad del Strapi UI (1 nivel de nesting de components), la respuesta incluye `strategies` (flat/modular/dynamiczone) — vuelve a llamar con strategy:'flat' (o 'modular') para materializar la opción elegida.",
     inputSchema: {
       type: "object",
       properties: {
@@ -169,6 +176,11 @@ export const schemaAuthoringTools: ToolDefinition[] = [
         schema: {
           type: "object",
           description: "Schema del component: { collectionName, info: {displayName, icon?, description?}, options?, attributes }.",
+        },
+        strategy: {
+          type: "string",
+          enum: [...VALID_STRATEGY_NAMES],
+          description: "Solo aplica si la propuesta original disparó NESTED_COMPONENT_DEPTH_EXCEEDED. Materializa la estrategia elegida (flat | modular | dynamiczone | as-proposed) en vez de rechazar la escritura. La estrategia 'as-proposed' es un escape hatch: escribe el schema EXACTAMENTE como lo enviaste, con un warning de que el component no será editable desde el Strapi Content-Type Builder UI (Strapi backend lo soporta perfecto).",
         },
         dry_run: { type: "boolean", default: false },
         force: { type: "boolean", default: false, description: "Suprime warnings (no errors)." },
@@ -181,16 +193,101 @@ export const schemaAuthoringTools: ToolDefinition[] = [
       if (isProduction()) productionRefusal();
 
       const uid = `${args.category}.${args.name}`;
-      const validation = validateSchemaProposal(
+      let effectiveSchema = args.schema;
+      let strategyApplied: { name: StrategyName; wiring_instructions?: string } | undefined;
+
+      // First-pass validation against the LLM's original proposal.
+      const initialValidation = validateSchemaProposal(
         strapi,
         { uid, kind: "component", schema: args.schema },
         "create"
       );
 
+      const depthViolation = initialValidation.violations.find(
+        (v) => v.code === "NESTED_COMPONENT_DEPTH_EXCEEDED"
+      );
+
+      if (depthViolation) {
+        // The LLM didn't pick a strategy yet — return the options without writing.
+        if (!args.strategy) {
+          const result = proposeSchemaStrategies(
+            strapi,
+            { kind: "component", uid, schema: args.schema },
+            depthViolation
+          );
+          return {
+            success: false,
+            validation: initialValidation,
+            strategies: result.strategies,
+            hint: "Tu propuesta excede el límite de profundidad del Strapi UI. Elige una estrategia (flat | modular | dynamiczone) y vuelve a llamar con `strategy: '<nombre>'` para materializarla.",
+            restart_required: false,
+          };
+        }
+
+        // Strategy chosen — apply it and continue with the materialized schema.
+        const applied = applyStrategyToProposal(
+          strapi,
+          { kind: "component", uid, schema: args.schema },
+          depthViolation,
+          args.strategy as StrategyName
+        );
+        if (applied.ok === false) {
+          return {
+            success: false,
+            validation: initialValidation,
+            error: `Strategy "${args.strategy}" no se pudo aplicar: ${applied.reason}`,
+            restart_required: false,
+          };
+        }
+        effectiveSchema = applied.schema;
+        strategyApplied = { name: args.strategy, wiring_instructions: applied.wiring_instructions };
+      }
+
+      // Re-validate (post-strategy or original if no strategy involved).
+      let validation = strategyApplied
+        ? validateSchemaProposal(
+            strapi,
+            { uid, kind: "component", schema: effectiveSchema },
+            "create"
+          )
+        : initialValidation;
+
+      // The "as-proposed" escape hatch consciously accepts the depth violation
+      // (Strapi backend handles it fine; only the CTB UI rejects it). Strip the
+      // NESTED_COMPONENT_DEPTH_EXCEEDED violation from the re-validation so the
+      // write can proceed, but downgrade it to a warning so the trade-off
+      // remains documented in the response.
+      if (strategyApplied?.name === "as-proposed") {
+        const depthErrors = validation.violations.filter(
+          (v) => v.code === "NESTED_COMPONENT_DEPTH_EXCEEDED"
+        );
+        validation = {
+          ...validation,
+          violations: validation.violations.filter(
+            (v) => v.code !== "NESTED_COMPONENT_DEPTH_EXCEEDED"
+          ),
+          warnings: [
+            ...validation.warnings,
+            ...depthErrors.map((v) => ({
+              ...v,
+              severity: "warning" as const,
+              message: `[as-proposed strategy] ${v.message} — aceptado conscientemente; el component no será editable desde el Content-Type Builder UI.`,
+            })),
+          ],
+          valid: validation.violations.filter(
+            (v) => v.code !== "NESTED_COMPONENT_DEPTH_EXCEEDED" && v.severity === "error"
+          ).length === 0,
+        };
+      }
+
       if (hasErrors(validation)) {
         return { success: false, validation, restart_required: false };
       }
-      if (validation.warnings.length > 0 && !args.force) {
+      // Bypass the warning-confirmation gate when strategy='as-proposed' was
+      // explicitly chosen: the user already accepted the trade-off by picking
+      // that strategy, requiring force=true on top would be double-confirmation.
+      const bypassWarningGate = strategyApplied?.name === "as-proposed";
+      if (validation.warnings.length > 0 && !args.force && !bypassWarningGate) {
         return {
           success: false,
           validation,
@@ -201,7 +298,7 @@ export const schemaAuthoringTools: ToolDefinition[] = [
 
       const filePath = pathsForComponent(args.category, args.name)[0].path;
       const files: FileToWrite[] = [
-        { path: filePath, content: JSON.stringify(args.schema, null, 2) + "\n" },
+        { path: filePath, content: JSON.stringify(effectiveSchema, null, 2) + "\n" },
       ];
 
       if (args.dry_run) {
@@ -211,11 +308,15 @@ export const schemaAuthoringTools: ToolDefinition[] = [
           files_to_write: files,
           restart_required: true,
           restart_info: buildRestartInfo(),
+          ...(strategyApplied ? { strategy_applied: strategyApplied } : {}),
         };
       }
 
       const writeResult = await writeFiles(files, { backup: args.backup ?? true });
-      return buildAuthoringResponse(validation, writeResult, { uid });
+      return buildAuthoringResponse(validation, writeResult, {
+        uid,
+        ...(strategyApplied ? { strategy_applied: strategyApplied } : {}),
+      });
     },
   },
 
@@ -321,7 +422,7 @@ export const schemaAuthoringTools: ToolDefinition[] = [
   {
     name: "add_field_to_schema",
     description:
-      "Agrega un atributo nuevo a un schema existente (content-type o component). Lee el schema.json del filesystem, agrega el atributo, valida la propuesta completa, escribe. DISPARA RESTART DE STRAPI (dev mode) — el endpoint MCP estará caído ~12s. Mira `restart_info` en la respuesta y espera ese tiempo; usa `__health` para confirmar que volvió. IMPORTANTE: si necesitas agregar varios campos, NO llames esta tool repetidamente (cada llamada dispara un restart de 12s). Mejor crea el content-type con todos los attributes de una vez, o si ya existe edita el schema.json a mano. Hace backup .bak.{timestamp} antes de overwrite.",
+      "Agrega UN atributo nuevo a un schema existente (content-type o component). Lee el schema.json del filesystem, agrega el atributo, valida la propuesta completa, escribe. DISPARA RESTART DE STRAPI (dev mode) — el endpoint MCP estará caído ~12s. Mira `restart_info` en la respuesta y espera ese tiempo; usa `__health` para confirmar que volvió. ⚠️ Si necesitas agregar VARIOS campos al mismo schema, NO llames esta tool repetidamente — usá `add_fields_to_schema` (plural, batch) que aplica N campos en un solo restart. Hace backup .bak.{timestamp} antes de overwrite.",
     inputSchema: {
       type: "object",
       properties: {
@@ -406,7 +507,133 @@ export const schemaAuthoringTools: ToolDefinition[] = [
     },
   },
 
-  // ── 7. delete_field_from_schema ─────────────────────────────────────────────
+  // ── 7. add_fields_to_schema (BATCH) ─────────────────────────────────────────
+  {
+    name: "add_fields_to_schema",
+    description:
+      "BATCH version de add_field_to_schema: agrega N atributos en una sola escritura → un solo restart de Strapi (en vez de N restarts). Recomendado cuando vas a agregar 2+ campos seguidos al mismo schema. Lee el schema.json una vez, mergea todos los fields, valida la propuesta completa, escribe una vez. Si CUALQUIER field tiene problemas (validation error, conflicto de nombre, etc.) toda la operación se aborta sin escribir nada (atómico). DISPARA UN SOLO RESTART (~12s).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        uid: { type: "string", description: "UID del schema (api::* o category.name)." },
+        fields: {
+          type: "array",
+          minItems: 1,
+          items: {
+            type: "object",
+            properties: {
+              field_name: { type: "string" },
+              field: {
+                type: "object",
+                description: "Definición del atributo (type, required, etc.).",
+              },
+            },
+            required: ["field_name", "field"],
+            additionalProperties: false,
+          },
+          description: "Lista de {field_name, field} a agregar atómicamente. Mínimo 1.",
+        },
+        dry_run: { type: "boolean", default: false },
+        force: { type: "boolean", default: false },
+        backup: { type: "boolean", default: true },
+      },
+      required: ["uid", "fields"],
+      additionalProperties: false,
+    },
+    handler: async ({ strapi }, args: any) => {
+      if (isProduction()) productionRefusal();
+
+      // Pre-flight: catch duplicate field_names within the batch BEFORE touching
+      // the filesystem. Atomic semantics → fail fast on bad args.
+      const seenInBatch = new Set<string>();
+      for (const entry of args.fields) {
+        const name = entry.field_name;
+        if (seenInBatch.has(name)) {
+          throw new Error(
+            `El campo "${name}" aparece duplicado dentro del batch fields[]. Cada field_name debe ser único.`
+          );
+        }
+        seenInBatch.add(name);
+      }
+
+      const isComponent = !args.uid.startsWith("api::");
+      const sourcePath = isComponent
+        ? pathsForComponent(args.uid.split(".")[0], args.uid.split(".")[1])[0].path
+        : pathsForContentType(args.uid.replace(/^api::/, "").split(".")[0]).schema;
+
+      const release = await acquirePathLock(sourcePath);
+      try {
+        let schema: any;
+        try {
+          schema = await readJson(sourcePath);
+        } catch (err) {
+          throw new Error(`No pude leer schema.json en ${sourcePath}: ${(err as Error).message}`);
+        }
+
+        // Second check: existing-attribute collisions. Requires the schema in
+        // memory. Same atomic semantics: ANY collision → abort entire batch.
+        const existingAttrs = schema.attributes ?? {};
+        for (const entry of args.fields) {
+          if (existingAttrs[entry.field_name]) {
+            throw new Error(
+              `El atributo "${entry.field_name}" ya existe en "${args.uid}". Usá delete_field_from_schema primero, o renombralo en el batch. Toda la operación abortada sin escribir nada.`
+            );
+          }
+        }
+
+        // Merge all fields into a fresh attributes object.
+        const mergedAttributes: Record<string, any> = { ...existingAttrs };
+        for (const { field_name, field } of args.fields) {
+          mergedAttributes[field_name] = field;
+        }
+        schema.attributes = mergedAttributes;
+
+        const validation = validateSchemaProposal(
+          strapi,
+          { uid: args.uid, kind: isComponent ? "component" : "content-type", schema },
+          "update"
+        );
+
+        if (hasErrors(validation)) {
+          return { success: false, validation, restart_required: false };
+        }
+        if (validation.warnings.length > 0 && !args.force) {
+          return {
+            success: false,
+            validation,
+            hint: "Hay warnings. Revisalas y volvé a llamar con force=true si querés escribir igual.",
+            restart_required: false,
+          };
+        }
+
+        const files: FileToWrite[] = [
+          { path: sourcePath, content: JSON.stringify(schema, null, 2) + "\n" },
+        ];
+
+        if (args.dry_run) {
+          return {
+            dry_run: true,
+            validation,
+            files_to_write: files,
+            added_fields: args.fields.map((f: any) => f.field_name),
+            restart_required: true,
+            restart_info: buildRestartInfo(),
+          };
+        }
+
+        const writeResult = await writeFiles(files, { backup: args.backup ?? true });
+        return buildAuthoringResponse(validation, writeResult, {
+          uid: args.uid,
+          added_fields: args.fields.map((f: any) => f.field_name),
+          batch_size: args.fields.length,
+        });
+      } finally {
+        release();
+      }
+    },
+  },
+
+  // ── 8. delete_field_from_schema ─────────────────────────────────────────────
   {
     name: "delete_field_from_schema",
     description:
@@ -499,6 +726,64 @@ export const schemaAuthoringTools: ToolDefinition[] = [
       } finally {
         release();
       }
+    },
+  },
+
+  // ── 9. propose_schema_strategy (read-only) ──────────────────────────────────
+  {
+    name: "propose_schema_strategy",
+    description:
+      "Dry-run de la lógica de strategies sobre una propuesta de component. Valida la propuesta SIN escribir nada, y si excede el límite de profundidad (NESTED_COMPONENT_DEPTH_EXCEEDED) devuelve las strategies disponibles (flat/modular/dynamiczone) con sus schemas materializados, wiring_instructions y trade-offs. Útil para explorar opciones antes de comprometerte con create_component.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        uid: {
+          type: "string",
+          description: "UID del component a proponer. Ej: 'molecules.card-with-button'.",
+        },
+        schema: {
+          type: "object",
+          description: "Mismo formato que create_component.schema: { collectionName?, info, attributes }.",
+        },
+      },
+      required: ["uid", "schema"],
+      additionalProperties: false,
+    },
+    handler: async ({ strapi }, args: any) => {
+      const validation = validateSchemaProposal(
+        strapi,
+        { uid: args.uid, kind: "component", schema: args.schema },
+        "create"
+      );
+
+      const depthViolation = validation.violations.find(
+        (v) => v.code === "NESTED_COMPONENT_DEPTH_EXCEEDED"
+      );
+
+      if (!depthViolation) {
+        return {
+          valid: validation.violations.length === 0,
+          validation,
+          strategies: [],
+          notes: ["La propuesta no disparó NESTED_COMPONENT_DEPTH_EXCEEDED. No hay strategies para proponer."],
+        };
+      }
+
+      const result = proposeSchemaStrategies(
+        strapi,
+        { kind: "component", uid: args.uid, schema: args.schema },
+        depthViolation
+      );
+
+      return {
+        valid: false,
+        validation,
+        strategies: result.strategies,
+        notes: [
+          "Esta tool NO escribe archivos — es solo para explorar opciones.",
+          "Para materializar una strategy, llama a create_component con `strategy: 'flat'` (o 'modular', 'dynamiczone').",
+        ],
+      };
     },
   },
 ];

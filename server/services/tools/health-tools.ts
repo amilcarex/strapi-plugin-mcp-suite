@@ -15,7 +15,7 @@ import type { ToolDefinition } from "./types";
  *      Si falla con ECONNREFUSED/timeout → Strapi sigue arrancando, retry en 2-3s.
  */
 
-const PLUGIN_VERSION = "0.2.0";
+const PLUGIN_VERSION = "0.5.0";
 const PROCESS_STARTED_AT = new Date().toISOString();
 
 export const healthTools: ToolDefinition[] = [

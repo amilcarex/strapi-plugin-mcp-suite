@@ -374,7 +374,95 @@ The security test exercises 18+ regression cases for C1 (path traversal), C3 (SS
 
 ---
 
+## Deep population on reads (v0.5.0)
+
+`find_entries` and `get_entry` accept two extra args to materialize a recursive populate tree without you having to hand-craft it:
+
+```jsonc
+{
+  "uid": "api::page.page",
+  "populate_deep": true,
+  "populate_depth": 4   // default 4, hard cap 6
+}
+```
+
+When `populate_deep: true`, the plugin walks the live schema and builds a populate object that expands every relation, component, dynamiczone and media field, recursing up to `populate_depth` levels. Cycles are protected by a `visited` Set — bidirectional relations don't spin forever.
+
+**Trade-offs:**
+- Queries become larger and slower. Use only when you genuinely need the full context (e.g. rendering a page with all its dynzone sections expanded).
+- The `pageSize` cap of 200 still applies, so worst-case is ~200 entries × the branching at each depth level.
+- `populate` (the explicit object) is ignored when `populate_deep: true`. The response carries a `warning` field if you accidentally pass both.
+
+System models (`admin::user`, `plugin::users-permissions.*`) are treated as shallow — large trees, rarely useful from an MCP client.
+
+## Schema strategies on writes (v0.5.0)
+
+Strapi's Content-Type Builder UI doesn't allow editing a component that nests another component more than 1 level deep. Before v0.5.0, the validator caught proposals exceeding this and returned an error. Now it returns **strategies** — concrete alternatives the LLM can pick from.
+
+When `create_component` receives a proposal triggering `NESTED_COMPONENT_DEPTH_EXCEEDED`, the response shape is:
+
+```jsonc
+{
+  "success": false,
+  "validation": { ... },
+  "strategies": [
+    { "name": "flat", "available": true, "schema": { ... }, "trade_offs": [...] },
+    { "name": "modular", "available": true, "schema": { ... }, "wiring_instructions": "...", "trade_offs": [...] },
+    { "name": "dynamiczone", "available": false, "unavailable_reason": "..." }
+  ],
+  "hint": "Elige una estrategia (flat | modular | dynamiczone) y vuelve a llamar con `strategy: '<nombre>'`."
+}
+```
+
+The three strategies:
+
+| Strategy | What it does | When it's unavailable |
+|---|---|---|
+| `flat` | Inlines the nested component's attributes into the parent with a `${attrName}_` prefix. One file, no manual wiring. | Parent attr is `repeatable: true`, nested component doesn't exist, or prefixed names would collide. |
+| `modular` | Writes the parent without the nested ref. Returns `wiring_instructions` with the JSON snippet the user must paste into the parent's schema manually. Maximum reusability. | Always available. |
+| `dynamiczone` | Converts the offending attribute to a `dynamiczone` (resets Strapi's depth counter). | Not applicable when the proposal is a component (dynzones only live in content-types). |
+| `as-proposed` (escape hatch) | Writes the schema EXACTLY as proposed, preserving the depth. The CTB UI rejects opening this component for editing, but Strapi's backend (DB, REST, GraphQL, lifecycle, populate) handles deeper nesting fine. | Always available — for users who know the limitation and prefer JSON-only editing. |
+
+To materialize, re-call `create_component` with `strategy: 'flat' | 'modular' | 'dynamiczone' | 'as-proposed'`. The plugin applies the strategy, re-validates, and writes.
+
+For a pure dry-run analysis without committing, use **`propose_schema_strategy`** — same input, no disk writes, returns the same strategy list.
+
+### Batch field additions: `add_fields_to_schema`
+
+The singular `add_field_to_schema` triggers a Strapi restart per call (~12s downtime each). When adding 2+ fields to the same schema, use the new **`add_fields_to_schema`** (plural) tool: it reads the schema once, merges all fields, validates, and writes once → **one restart total**.
+
+```jsonc
+{
+  "uid": "api::page.page",
+  "fields": [
+    { "field_name": "subtitle", "field": { "type": "string" } },
+    { "field_name": "slug",     "field": { "type": "uid", "targetField": "subtitle" } },
+    { "field_name": "cover",    "field": { "type": "media" } }
+  ]
+}
+```
+
+Atomic: if any field collides (within the batch or against existing attributes), the entire operation aborts without writing. No partial states.
+
+**Note**: Strategy support currently lives in `create_component` only. `create_content_type` and `add_field_to_schema` will get the same fork in a future release.
+
 ## Known limitations
+
+### Schema-authoring chains can hang Claude Desktop via mcp-remote
+
+When you call `add_field_to_schema` (or any schema-authoring tool), Strapi restarts in dev mode and the MCP endpoint is unreachable for ~10-15s. Two compounding issues make this fragile when chaining multiple operations from Claude Desktop:
+
+1. **The LLM frequently ignores `restart_info.estimated_downtime_seconds`.** Observed in live testing: Claude received `estimated_downtime_seconds: 12` and called `__health` just 2 seconds later, hitting Strapi mid-restart. The plugin can only emit hints in the tool response — the protocol has no mechanism to block the next call for N seconds.
+2. **The `mcp-remote` bridge gives up after 2 reconnection attempts.** Claude Desktop uses [mcp-remote](https://www.npmjs.com/package/mcp-remote) as an stdio↔HTTP bridge. When the endpoint returns `ECONNREFUSED` during the restart window, mcp-remote tries twice and then throws `Maximum reconnection attempts (2) exceeded`. Even when Strapi comes back, the session stays dead until Claude Desktop is fully restarted.
+
+**Workarounds:**
+
+- **Prefer batch operations.** Use `add_fields_to_schema` (plural) to apply N fields in one restart instead of N restarts. Same logic applies to `create_content_type` with all attributes defined up front. Each restart is one chance to lose the session — minimize the count.
+- **Restart Claude Desktop completely** (system tray → Quit, NOT just close the window) if a chain fails mid-way. Reopening clears the dead bridge.
+- **For projects with slow boot** (TypeScript types + many plugins + WSL/VMs), `restart_info` may underestimate. After a schema operation, wait ~25s manually before any next MCP interaction.
+- **Consider Claude Code instead of Claude Desktop** for heavy schema-authoring sessions. Claude Code talks to the MCP server over HTTP directly (no stdio bridge) and handles `ECONNREFUSED` more gracefully.
+
+This is a Claude Desktop + mcp-remote compatibility issue, not a plugin bug — the endpoint behaves identically to any other HTTP service during restart. The audit log shows the operation succeeded server-side even when the client sees a hung session.
 
 ### Anti-impersonation via `adminUserOwner` is not implemented
 
@@ -408,6 +496,7 @@ The check was removed in 0.3.1 because keeping it would generate false confidenc
 
 - [x] npm publish: [strapi-plugin-mcp-suite](https://www.npmjs.com/package/strapi-plugin-mcp-suite)
 - [x] Forensic audit trail (token lifecycle + operations) — v0.4.0
+- [x] Deep populate on reads + progressive schema strategies on writes — v0.5.0
 - [ ] Strapi marketplace approval
 - [ ] Redis backend for rate limiting (multi-instance support)
 - [ ] Admin UI panel for browsing the audit log
@@ -427,5 +516,3 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md).
 ## License
 
 [MIT](./LICENSE) — Amilcar Coronado, 2026.
- 
- 

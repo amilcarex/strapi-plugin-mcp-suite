@@ -48,10 +48,10 @@ export function buildRestartInfo(): RestartInfo {
     estimated_ready_at: new Date(Date.now() + ESTIMATED_DOWNTIME_SECONDS * 1000).toISOString(),
     what_happens:
       "Strapi (dev mode) detectará el cambio en src/api o src/components, recompilará TypeScript y reiniciará. El endpoint MCP estará inaccesible durante ese tiempo. En producción NO recarga — requiere redeploy.",
-    next_action_for_llm: `Espera al menos ${ESTIMATED_DOWNTIME_SECONDS} segundos antes de hacer otra operación. Si necesitas hacer múltiples cambios de schema, agrupalos en una sola call (ej: usa create_content_type con todos los attributes definidos, no llames add_field_to_schema repetidamente).`,
+    next_action_for_llm: `🛑 STOP. NO llames NINGUNA otra tool de este servidor MCP durante los próximos ${ESTIMATED_DOWNTIME_SECONDS} segundos. Strapi está reiniciando. Si llamas antes, vas a recibir ECONNREFUSED y el bridge mcp-remote (Claude Desktop) puede colgarse permanentemente forzando reiniciar el cliente. Espera ${ESTIMATED_DOWNTIME_SECONDS}s COMPLETOS, después llama __health para confirmar que volvió. Si tenés que hacer múltiples modificaciones, agrupalas en UNA call: usa create_content_type con todos los attributes, o add_fields_to_schema (batch) en lugar de add_field_to_schema repetidamente.`,
     verify_ready_with_tool: "__health",
     retry_strategy:
-      "Si la próxima llamada falla con ECONNREFUSED, timeout, o error de red, NO es un bug del plugin — es que Strapi todavía está reiniciando. Llama a __health cada 2-3 segundos hasta que responda; si después de 30s sigue fallando, hay un problema real (revisa logs de Strapi).",
+      "Si la próxima llamada falla con ECONNREFUSED, timeout, o error de red, NO es un bug del plugin — es que Strapi todavía está reiniciando. Llama a __health cada 2-3 segundos hasta que responda; si después de 30s sigue fallando, hay un problema real (revisa logs de Strapi). KNOWN ISSUE: el bridge mcp-remote (usado por Claude Desktop) se rinde tras 2 reconexiones fallidas; si tu sesión queda muerta, reinicia Claude Desktop completo.",
   };
 }
 

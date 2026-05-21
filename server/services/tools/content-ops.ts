@@ -1,6 +1,11 @@
 import type { ToolDefinition } from "./types";
 import { buildSchemaCatalog } from "../schema-derivation/build-catalog";
 import { deriveContentTypeFields, deriveComponentFields } from "../schema-derivation/derive";
+import {
+  generateDeepPopulate,
+  DEFAULT_POPULATE_DEPTH,
+  MAX_POPULATE_DEPTH,
+} from "../populate/deep-populate";
 
 /**
  * Tools genéricas de gestión de contenido. Delegan a `strapi.documents()` para
@@ -22,6 +27,19 @@ function assertContentType(strapi: any, uid: string): any {
     );
   }
   return ct;
+}
+
+/**
+ * Clamps the user-provided populate_depth to [1, MAX_POPULATE_DEPTH]. The JSON
+ * Schema validator should reject values outside this range before we get here,
+ * but we re-clamp defensively in case the schema is bypassed (e.g. registry
+ * tools that re-invoke handlers programmatically).
+ */
+function clampPopulateDepth(requested: unknown): number {
+  const n = typeof requested === "number" && Number.isFinite(requested)
+    ? Math.floor(requested)
+    : DEFAULT_POPULATE_DEPTH;
+  return Math.min(Math.max(1, n), MAX_POPULATE_DEPTH);
 }
 
 export const contentOpsTools: ToolDefinition[] = [
@@ -89,7 +107,7 @@ export const contentOpsTools: ToolDefinition[] = [
   {
     name: "find_entries",
     description:
-      "Busca entries de un content-type. Soporta filters (sintaxis de Strapi: {field: {$eq: val}}), sort, pagination, populate y status (draft|published). Delega a strapi.documents().findMany.",
+      "Busca entries de un content-type. Soporta filters (sintaxis de Strapi: {field: {$eq: val}}), sort, pagination, populate y status (draft|published). Delega a strapi.documents().findMany. Para traer relations/components anidados sin armar el tree a mano, pasá populate_deep:true (auto-genera el populate recursivo hasta populate_depth niveles).",
     inputSchema: {
       type: "object",
       properties: {
@@ -103,7 +121,19 @@ export const contentOpsTools: ToolDefinition[] = [
             pageSize: { type: "integer", default: 25 },
           },
         },
-        populate: { description: "* | string[] | object — qué relaciones/components traer." },
+        populate: { description: "* | string[] | object — qué relaciones/components traer. Ignorado si populate_deep=true." },
+        populate_deep: {
+          type: "boolean",
+          default: false,
+          description: "Si true, ignora populate y auto-genera el tree recursivo hasta populate_depth niveles (relations, components, dynamiczones, media). Trade-off: queries más grandes y lentas; usá solo cuando necesités contexto completo.",
+        },
+        populate_depth: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_POPULATE_DEPTH,
+          default: DEFAULT_POPULATE_DEPTH,
+          description: `Profundidad del auto-populate cuando populate_deep=true. Hard cap ${MAX_POPULATE_DEPTH} para evitar explosiones combinatorias.`,
+        },
         status: { type: "string", enum: ["draft", "published"] },
         locale: { type: "string" },
         fields: { description: "Lista de campos a devolver." },
@@ -116,10 +146,22 @@ export const contentOpsTools: ToolDefinition[] = [
       const query: any = {};
       if (args.filters) query.filters = args.filters;
       if (args.sort) query.sort = args.sort;
-      if (args.populate) query.populate = args.populate;
       if (args.status) query.status = args.status;
       if (args.locale) query.locale = args.locale;
       if (args.fields) query.fields = args.fields;
+
+      // populate_deep tiene precedencia sobre populate. Si ambos vienen, ignoramos
+      // populate y devolvemos warning para que el LLM sepa qué pasó.
+      let populateWarning: string | undefined;
+      if (args.populate_deep === true) {
+        const depth = clampPopulateDepth(args.populate_depth);
+        query.populate = generateDeepPopulate(strapi, args.uid, depth);
+        if (args.populate !== undefined) {
+          populateWarning = `El argumento "populate" fue ignorado porque populate_deep=true. Se generó el tree automáticamente con depth=${depth}.`;
+        }
+      } else if (args.populate !== undefined) {
+        query.populate = args.populate;
+      }
 
       const page = args.pagination?.page ?? 1;
       // Cap defensivo: pageSize máximo 200 — evita que el LLM pida 100k entries
@@ -140,6 +182,7 @@ export const contentOpsTools: ToolDefinition[] = [
       if (requestedPageSize > PAGE_SIZE_HARD_CAP) {
         result.pagination_capped = `Solicitaste pageSize=${requestedPageSize} pero el cap es ${PAGE_SIZE_HARD_CAP}. Se aplicó ${PAGE_SIZE_HARD_CAP}.`;
       }
+      if (populateWarning) result.warning = populateWarning;
       return result;
     },
   },
@@ -148,13 +191,25 @@ export const contentOpsTools: ToolDefinition[] = [
   {
     name: "get_entry",
     description:
-      "Devuelve un entry por documentId. Soporta populate, status y locale.",
+      "Devuelve un entry por documentId. Soporta populate, status y locale. Para traer todo el árbol de relaciones/components sin armar populate a mano, pasá populate_deep:true.",
     inputSchema: {
       type: "object",
       properties: {
         uid: { type: "string" },
         documentId: { type: "string" },
-        populate: {},
+        populate: { description: "Ignorado si populate_deep=true." },
+        populate_deep: {
+          type: "boolean",
+          default: false,
+          description: "Si true, ignora populate y auto-genera el tree recursivo hasta populate_depth niveles.",
+        },
+        populate_depth: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_POPULATE_DEPTH,
+          default: DEFAULT_POPULATE_DEPTH,
+          description: `Profundidad del auto-populate cuando populate_deep=true. Hard cap ${MAX_POPULATE_DEPTH}.`,
+        },
         status: { type: "string", enum: ["draft", "published"] },
         locale: { type: "string" },
       },
@@ -163,14 +218,25 @@ export const contentOpsTools: ToolDefinition[] = [
     },
     handler: async ({ strapi }, args: any) => {
       assertContentType(strapi, args.uid);
+
+      let populate = args.populate;
+      let warning: string | undefined;
+      if (args.populate_deep === true) {
+        const depth = clampPopulateDepth(args.populate_depth);
+        populate = generateDeepPopulate(strapi, args.uid, depth);
+        if (args.populate !== undefined) {
+          warning = `El argumento "populate" fue ignorado porque populate_deep=true. Se generó el tree automáticamente con depth=${depth}.`;
+        }
+      }
+
       const doc = await strapi.documents(args.uid as any).findOne({
         documentId: args.documentId,
-        populate: args.populate,
+        populate,
         status: args.status,
         locale: args.locale,
       } as any);
       if (!doc) throw new Error(`Entry ${args.documentId} no encontrado en ${args.uid}.`);
-      return doc;
+      return warning ? { ...(doc as any), warning } : doc;
     },
   },
 
