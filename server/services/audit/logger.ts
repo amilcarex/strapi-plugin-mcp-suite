@@ -12,6 +12,23 @@ import { summarizeResult } from "./summarize";
 
 const OP_LOG_UID = "plugin::strapi-mcp.op-log" as any;
 
+/**
+ * Tool names considered destructive. Op-log rows for these get `destructive:true`
+ * so a super-admin can filter the forensic log for high-risk operations fast.
+ * Kept as an explicit allowlist (not a `delete_*` regex) so a future read tool
+ * that happens to start with "delete" isn't mis-flagged.
+ */
+const DESTRUCTIVE_TOOLS = new Set([
+  "delete_entry",
+  "delete_field_from_schema",
+  "delete_media",
+]);
+
+/** True when the tool name is a known destructive operation. */
+export function isDestructiveTool(toolName: string): boolean {
+  return DESTRUCTIVE_TOOLS.has(toolName);
+}
+
 export interface LogOperationFields {
   toolName: string;
   args: unknown;
@@ -50,6 +67,7 @@ export async function logOperation(strapi: Core.Strapi, fields: LogOperationFiel
         duration_ms: Math.max(0, Math.round(fields.durationMs)),
         ip: fields.request?.ip ?? null,
         user_agent: fields.request?.userAgent ?? null,
+        destructive: isDestructiveTool(fields.toolName),
       },
     });
   } catch (err) {

@@ -300,7 +300,7 @@ export const contentOpsTools: ToolDefinition[] = [
   {
     name: "delete_entry",
     description:
-      "Elimina un entry (draft + published) por documentId. REQUIERE confirm:true.",
+      "⚠️ DESTRUCTIVA. Elimina un entry (draft + published) por documentId. REQUIERE confirm:true. USA ESTA TOOL SOLO cuando el usuario pidió explícitamente borrar ESE entry — no la uses como paso intermedio para 'limpiar' o 'rehacer' algo sin que el usuario lo haya pedido. La eliminación es irreversible.",
     inputSchema: {
       type: "object",
       properties: {

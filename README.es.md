@@ -446,6 +446,35 @@ Atómica: si CUALQUIER field colisiona (dentro del batch o contra los atributos 
 
 **Nota**: Por ahora el soporte de strategies vive solo en `create_component`. `create_content_type` y `add_field_to_schema` van a sumar el mismo fork en una release futura.
 
+### Mutación completa de schema en un restart: `modify_schema` (v0.6.0)
+
+`modify_schema` es la tool de schema más potente — combina **remove + add + update** en una escritura atómica → **un solo restart de Strapi** en vez de N:
+
+```jsonc
+{
+  "uid": "molecules.feature-item",
+  "remove": ["legacy_field"],
+  "update": [{ "field_name": "count", "field": { "type": "biginteger" } }],
+  "add":    [{ "field_name": "slug",  "field": { "type": "uid", "targetField": "title" } }]
+}
+```
+
+- `remove[]` — nombres de campos a eliminar (refusa si una relación de otro schema depende vía `inversedBy`/`mappedBy`)
+- `update[]` — reemplaza la definición completa de un campo. Es la forma de cambiar el `type` (ej. `text → string`) sin orquestar delete + add.
+- `add[]` — campos nuevos (con chequeo de colisión)
+
+Se aplica en orden `remove → update → add`, se valida el resultado completo, se escribe una vez. Cualquier falla aborta todo — sin estados parciales. Los conflictos entre listas (un nombre en `remove` y `add` a la vez, duplicados, etc.) se detectan antes de tocar el filesystem.
+
+### Atomización proactiva: `suggest_reusable_atoms` (v0.6.0)
+
+Tool de análisis read-only. Recorre todos los components y content-types, cuenta patrones `(fieldName, type)` repetidos, y marca campos escalares que valdría la pena promover a atoms reutilizables — el caso clásico de `title: string` copiado en 8 sections.
+
+```jsonc
+{ "scope": "all", "min_occurrences": 3 }
+```
+
+Para cada candidato fuerte devuelve la lista `used_in`, un **schema starter del atom** (con enrichment incorporado para nombres conocidos — `title → atoms.heading` con tag/align, `icon → atoms.icon` con size/color), y un `execution_plan` de llamadas concretas `create_component` + `modify_schema` que podés ejecutar tras revisión. También marca depth warnings (cuando un consumidor está anidado) y una nota de migración de datos. Nunca escribe.
+
 ## Limitaciones conocidas
 
 ### Cadenas de schema-authoring pueden colgar Claude Desktop vía mcp-remote

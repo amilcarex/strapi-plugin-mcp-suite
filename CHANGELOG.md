@@ -4,21 +4,36 @@ All notable changes to `strapi-plugin-mcp` are documented here. Format follows [
 
 ## [Unreleased]
 
-### Planned for v0.5.1 — Restraints on destructive ops
-- `delete_field_from_schema` requires `confirm: true` (parity with `delete_entry`). Forces the LLM to surface the deletion to the user instead of silently fixing unrelated problems by deleting fields.
-- Hardened descriptions on all destructive tools: "USE ONLY when the user explicitly named this for deletion. Do NOT delete to fix unrelated problems."
-- Audit log: `destructive: true` flag on `delete_*` op rows for easy forensic filtering.
-
-### Planned for v0.5.2 — Proactive atomization
-- New tool `suggest_reusable_atoms({ scope?: 'all' | 'component_uid' })`. Walks the live component+CT catalog, counts repeated field patterns (e.g. "`title: string` appears in 8 sections", "`icon: string` appears in 4 molecules"), and proposes a promotion plan: create a new flat atom (`atoms.heading`, `atoms.icon`, etc.) + replace usages + migrate data. Closes the gap where the LLM defaults to "add more fields" instead of "extract a reusable atom".
-
-### Planned for v0.6.0+
+### Planned
+- Log noise cleanup: 401/403/429 from the auth policy and rate-limit middleware should log as a single-line `warn`, not `error` with a stack trace. Deferred from 0.6.0 — the fix touches the security-critical `require-api-token` policy and wasn't worth the regression risk for a cosmetic gain.
 - Redis backend for multi-instance rate limiting
 - `delete_content_type` with multi-step confirmation
 - i18n-specific tools
 - Admin UI panel for browsing the audit log
 - Extend `strategy` resolution to `create_content_type` and `add_field_to_schema`
-- `flatten_now` tool to migrate existing schemas
+- Investigate the `pnpm publish` 404 bug (granular token) so npm isn't the only working publish path
+
+## [0.6.0] - 2026-05-21
+
+### Added
+
+- **`modify_schema` — batch schema mutation in a single restart.** New tool that combines `remove[]` (delete fields), `add[]` (new fields) and `update[]` (replace a field's definition — e.g. change its `type`) into ONE atomic read-modify-write. Replaces chaining `delete_field_from_schema` + `add_fields_to_schema` (which is N restarts). Applies `remove → update → add`, validates the full result, writes once. Any failure (missing field, collision, relation blocker, validation error) aborts the whole operation without writing. Cross-list conflict detection runs before the filesystem is touched (a field can't be in `remove` and `add`, etc.).
+- **`suggest_reusable_atoms` — proactive atomization analysis (read-only).** Walks every component and content-type, counts repeated `(fieldName, type)` patterns, and flags scalar fields worth promoting to reusable atom components (e.g. `title: string` copy-pasted across 8 sections). For each strong candidate it returns: occurrence count, `used_in` list, a starter atom schema (with built-in enrichment for known names like `title → atoms.heading`, `icon → atoms.icon`), an `execution_plan` of concrete `create_component` + `modify_schema` calls, depth warnings when a consumer is itself nested, and a data-migration note. Never writes — pure analysis. Closes the gap where the LLM defaults to "add another loose field" instead of "extract a reusable atom".
+- **Audit log: `destructive` flag.** The `op-log` content-type gains a `destructive: boolean` column. The logger sets it `true` for `delete_entry`, `delete_field_from_schema` and `delete_media`. Lets a super-admin filter the forensic log for high-risk operations: `SELECT * FROM mcp_op_logs WHERE destructive = 1`. `modify_schema` is intentionally NOT flagged destructive — it can remove fields but only when `remove[]` is passed explicitly.
+- **24 new unit tests** (modify_schema conflict detection + fs-backed ops, suggest_reusable_atoms detection/tiers/plan/depth-warnings, destructive-flag logging). Total: **299/299 passing**.
+
+### Changed
+
+- **Hardened descriptions on the 3 destructive tools** (`delete_field_from_schema`, `delete_entry`, `delete_media`). Each now opens with `⚠️ DESTRUCTIVA` and an explicit instruction: use the tool only when the user named the target explicitly; do NOT delete things to "fix" unrelated problems autonomously. Triggered by a live-testing observation where the LLM deleted a user-added field to resolve an unrelated depth violation without asking.
+- Internal `version` field in `createMcpServer` bumped to `0.6.0`.
+
+### Documentation
+
+- README (EN + ES): new sections for `modify_schema` and `suggest_reusable_atoms`.
+
+### Notes
+
+- The `confirm: true` requirement planned for `delete_field_from_schema` in the old 0.5.1 roadmap turned out to already exist (the field was always `required`). The real fix for autonomous deletions is the hardened descriptions + the `destructive` audit flag — `confirm` doesn't help because the LLM can set it itself. This release combines what was scoped as 0.5.1 + 0.5.2 into one.
 
 ## [0.5.0] - 2026-05-18
 
