@@ -52,7 +52,7 @@ export function createMcpServer(strapi: Core.Strapi, ctx: McpServerContext = {})
   const server = new Server(
     {
       name: "strapi-mcp",
-      version: "0.6.0",
+      version: "0.6.1",
     },
     {
       capabilities: { tools: {} },

@@ -1,6 +1,6 @@
 {
   "name": "strapi-plugin-mcp-suite",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "MCP server plugin for Strapi v5: generic content management, visual layout config, schema authoring, media uploads and GraphQL — with native API token auth, multi-layer rate limiting and a forensic audit trail (token lifecycle + every operation). Production-ready.",
   "exports": {
     "./strapi-server": "./dist/strapi-server.js",
@@ -48,6 +48,10 @@
   "homepage": "https://github.com/amilcarex/strapi-plugin-mcp-suite#readme",
   "bugs": {
     "url": "https://github.com/amilcarex/strapi-plugin-mcp-suite/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ajv": "^8.0.0"
   },
   "peerDependencies": {
     "@strapi/strapi": "^5.0.0"
