@@ -13,7 +13,7 @@
 ## TL;DR
 
 Pegá este plugin en cualquier proyecto Strapi v5, crea un API token, conecta tu cliente MCP a
-`/api/strapi-mcp/stream`. El LLM puede ahora leer y escribir entries, reorganizar layouts del admin,
+`/api/strapi-mcp-suite/stream`. El LLM puede ahora leer y escribir entries, reorganizar layouts del admin,
 generar components y content-types (opt-in), subir media (opt-in) y ejecutar queries GraphQL
 (opt-in) — todo a través de las APIs nativas de Strapi (`strapi.documents()`, lifecycle hooks,
 validación, draft & publish).
@@ -44,7 +44,7 @@ con enforcement de permisos para eliminar tokens.
 Las tools custom registradas desde el bootstrap del proyecto aparecen junto a las built-in:
 
 ```ts
-strapi.plugin('strapi-mcp').service('registry').registerTool({
+strapi.plugin('strapi-mcp-suite').service('registry').registerTool({
   name: 'my_custom_tool',
   description: '...',
   inputSchema: { ... },
@@ -70,35 +70,19 @@ built-ins) y opcionalmente corre `testCases` para darte confianza antes de expon
 
 ## Instalación
 
-Por ahora se distribuye solo via git (npm publish próximamente):
-
 ```bash
-# Clona el plugin a tu proyecto Strapi
-cd <tu-proyecto-strapi>/src/plugins
-git clone https://github.com/amilcarex/strapi-plugin-mcp-suite.git strapi-mcp
-
-# Compila el dist del plugin
-cd strapi-mcp
-npm install
-npm run build
+pnpm add strapi-plugin-mcp-suite
 ```
 
-Después habilítalo en `config/plugins.ts`:
-
-```ts
-export default {
-  'strapi-mcp': {
-    enabled: true,
-    resolve: './src/plugins/strapi-mcp',
-  },
-};
-```
-
-Reinicia Strapi. Deberías ver:
+Strapi v5 descubre el plugin automáticamente — no necesitas una entrada en
+`config/plugins`. Reinicia Strapi. Deberías ver:
 
 ```
-[strapi-mcp] plugin loaded — endpoint /api/strapi-mcp/stream | strapi=5.46.0 | env=development | schema_authoring=disabled | upload=disabled | graphql=disabled
+[strapi-mcp] plugin loaded — endpoint /api/strapi-mcp-suite/stream | strapi=5.46.0 | env=development | schema_authoring=disabled | upload=disabled | graphql=disabled
 ```
+
+> ¿Vas a desarrollar el plugin desde el código fuente? Mira [CONTRIBUTING.md](CONTRIBUTING.md)
+> para el setup con clon local.
 
 ---
 
@@ -126,7 +110,7 @@ Edita `~/.claude.json` o el config de tu cliente:
 {
   "mcpServers": {
     "strapi-local": {
-      "url": "http://localhost:1337/api/strapi-mcp/stream",
+      "url": "http://localhost:1337/api/strapi-mcp-suite/stream",
       "headers": {
         "Authorization": "Bearer TU_TOKEN_AQUI"
       }
@@ -150,7 +134,7 @@ Support/Claude/claude_desktop_config.json` (macOS):
       "args": [
         "-y",
         "mcp-remote",
-        "http://localhost:1337/api/strapi-mcp/stream",
+        "http://localhost:1337/api/strapi-mcp-suite/stream",
         "--header",
         "Authorization:${AUTH_HEADER}"
       ],
@@ -209,7 +193,7 @@ poisoning, o jailbreak podrían convertirlo en adversario. Defensas:
 - **API tokens nativos de Strapi** — sin esquema de auth custom que pueda romperse. Reusa el hashing
   y storage de Strapi.
 - **Enforcement granular de permisos** — los tokens Custom deben tener
-  `plugin::strapi-mcp.stream.handle` marcado explícitamente. Tokens tipo `Custom` sin el permiso del
+  `plugin::strapi-mcp-suite.stream.handle` marcado explícitamente. Tokens tipo `Custom` sin el permiso del
   MCP marcado se rechazan con `401 Custom token missing MCP permission`. Los `Full Access` y `Read
   Only` pasan por diseño (scope más amplio).
 - **Atribución best-effort** — si el token tiene `adminUserOwner` populated (solo ocurre para tokens
@@ -338,7 +322,7 @@ Las tools custom viven en el bootstrap de tu proyecto `src/index.ts`:
 export default {
   register() {},
   bootstrap({ strapi }) {
-    strapi.plugin('strapi-mcp').service('registry').registerTool({
+    strapi.plugin('strapi-mcp-suite').service('registry').registerTool({
       name: 'feature_article',
       description: 'Marca un artículo como destacado (setea is_featured=true y featured_at=now). Útil cuando un editor quiere destacar contenido sin abrir el admin.',
       inputSchema: {

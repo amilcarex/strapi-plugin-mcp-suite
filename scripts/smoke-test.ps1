@@ -1,4 +1,4 @@
-# Smoke test del plugin strapi-mcp (Windows / PowerShell).
+# Smoke test del plugin strapi-mcp-suite (Windows / PowerShell).
 #
 # Uso:
 #   $env:STRAPI_MCP_TOKEN = "tu-api-token"
@@ -23,7 +23,7 @@ if (-not $Token) {
 
 $script:Pass = 0
 $script:Fail = 0
-$Url = "$BaseUrl/api/strapi-mcp/stream"
+$Url = "$BaseUrl/api/strapi-mcp-suite/stream"
 
 function Check {
   param([string]$Name, [bool]$Condition)
@@ -74,7 +74,7 @@ function Get-CallText {
 }
 
 Write-Host "=========================================="
-Write-Host "strapi-mcp smoke test (PowerShell)"
+Write-Host "strapi-mcp-suite smoke test (PowerShell)"
 Write-Host "Base: $BaseUrl"
 Write-Host "=========================================="
 
@@ -97,7 +97,7 @@ Write-Host "→ MCP handshake"
 
 $init = Invoke-Mcp '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke-test","version":"1.0"}}}'
 $serverName = $init.Data.result.serverInfo.name
-Check "initialize -> serverInfo.name=strapi-mcp (got $serverName)" ($serverName -eq "strapi-mcp")
+Check "initialize -> serverInfo.name=strapi-mcp-suite (got $serverName)" ($serverName -eq "strapi-mcp-suite")
 Check "initialize -> capabilities.tools presente" ($null -ne $init.Data.result.capabilities.tools)
 
 # ─── tools/list ──────────────────────────────────────────────────────────────

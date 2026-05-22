@@ -18,8 +18,8 @@ import type { ToolDefinition, ToolContext } from "./types";
  * authenticated MCP token would defeat the purpose.
  */
 
-const TOKEN_AUDIT_UID = "plugin::strapi-mcp.token-audit" as any;
-const OP_LOG_UID = "plugin::strapi-mcp.op-log" as any;
+const TOKEN_AUDIT_UID = "plugin::strapi-mcp-suite.token-audit" as any;
+const OP_LOG_UID = "plugin::strapi-mcp-suite.op-log" as any;
 const SUPER_ADMIN_CODE = "strapi-super-admin";
 
 function denyIfNotSuperAdmin(ctx: ToolContext): { error: string; details: any } | null {

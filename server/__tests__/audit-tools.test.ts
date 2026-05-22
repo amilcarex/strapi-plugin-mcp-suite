@@ -4,8 +4,8 @@ import * as assert from "node:assert/strict";
 import { auditTools } from "../services/tools/audit-tools";
 import { buildAuditMockStrapi, FAKE_SUPER_ADMIN, FAKE_REGULAR_USER } from "./_audit-helpers";
 
-const TOKEN_AUDIT = "plugin::strapi-mcp.token-audit";
-const OP_LOG = "plugin::strapi-mcp.op-log";
+const TOKEN_AUDIT = "plugin::strapi-mcp-suite.token-audit";
+const OP_LOG = "plugin::strapi-mcp-suite.op-log";
 
 const tokenCreators = auditTools.find((t) => t.name === "__audit_token_creators")!;
 const logQuery = auditTools.find((t) => t.name === "__audit_log_query")!;

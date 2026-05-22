@@ -2,7 +2,7 @@ import type { Core } from "@strapi/strapi";
 
 /**
  * Registers lifecycle hooks on `admin::api-token` that maintain the forensic
- * audit table `plugin::strapi-mcp.token-audit`.
+ * audit table `plugin::strapi-mcp-suite.token-audit`.
  *
  * Called from `bootstrap.ts` — must NOT run in `register` because content-types
  * (including ours) are not yet loaded there.
@@ -24,7 +24,7 @@ import type { Core } from "@strapi/strapi";
  * `.catch(swallow)`). It only throws to enforce the delete-permission rule.
  */
 
-const TOKEN_AUDIT_UID = "plugin::strapi-mcp.token-audit" as any;
+const TOKEN_AUDIT_UID = "plugin::strapi-mcp-suite.token-audit" as any;
 const API_TOKEN_UID = "admin::api-token" as any;
 const SUPER_ADMIN_CODE = "strapi-super-admin";
 

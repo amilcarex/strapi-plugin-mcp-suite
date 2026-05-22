@@ -32,7 +32,7 @@ import { logOperation } from "./audit/logger";
  *     siguen apareciendo en list_tools pero los writers refusan en runtime
  *     con SCHEMA_AUTHORING_DISABLED_IN_PRODUCTION (safety net adicional).
  *
- * Tools custom registradas via `strapi.plugin('strapi-mcp').service('registry')
+ * Tools custom registradas via `strapi.plugin('strapi-mcp-suite').service('registry')
  * .registerTool(...)` se agregan al array final.
  */
 export interface McpServerContext {
@@ -51,8 +51,8 @@ export interface McpServerContext {
 export function createMcpServer(strapi: Core.Strapi, ctx: McpServerContext = {}) {
   const server = new Server(
     {
-      name: "strapi-mcp",
-      version: "0.6.1",
+      name: "strapi-mcp-suite",
+      version: "0.6.2",
     },
     {
       capabilities: { tools: {} },
@@ -86,7 +86,7 @@ export function createMcpServer(strapi: Core.Strapi, ctx: McpServerContext = {})
 
   // Tools registradas por el proyecto consumidor.
   try {
-    const registry = strapi.plugin("strapi-mcp").service("registry") as any;
+    const registry = strapi.plugin("strapi-mcp-suite").service("registry") as any;
     const custom = (registry?.getTools?.() ?? []) as ToolDefinition[];
     if (custom.length > 0) {
       tools.push(...custom);

@@ -4,7 +4,7 @@ import * as assert from "node:assert/strict";
 import { runCleanup } from "../services/audit/cleanup";
 import { buildAuditMockStrapi } from "./_audit-helpers";
 
-const OP_LOG = "plugin::strapi-mcp.op-log";
+const OP_LOG = "plugin::strapi-mcp-suite.op-log";
 
 const ENV_KEYS = [
   "MCP_AUDIT_RETENTION_DAYS",

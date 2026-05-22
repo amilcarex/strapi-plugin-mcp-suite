@@ -1,5 +1,5 @@
 /**
- * `plugin::strapi-mcp.op-log` — 1 fila por `tools/call` MCP ejecutado.
+ * `plugin::strapi-mcp-suite.op-log` — 1 fila por `tools/call` MCP ejecutado.
  *
  * Written from `mcp-server.ts` after each tool handler resolves (success or
  * error). `args_redacted` strips secret-shaped keys before persisting;

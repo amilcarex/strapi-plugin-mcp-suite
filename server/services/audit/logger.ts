@@ -10,7 +10,7 @@ import { summarizeResult } from "./summarize";
  * log is observability, not part of the success path of the tool.
  */
 
-const OP_LOG_UID = "plugin::strapi-mcp.op-log" as any;
+const OP_LOG_UID = "plugin::strapi-mcp-suite.op-log" as any;
 
 /**
  * Tool names considered destructive. Op-log rows for these get `destructive:true`

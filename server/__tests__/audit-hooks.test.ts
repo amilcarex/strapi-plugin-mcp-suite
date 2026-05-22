@@ -9,7 +9,7 @@ import {
   FAKE_CREATOR_USER,
 } from "./_audit-helpers";
 
-const TOKEN_AUDIT = "plugin::strapi-mcp.token-audit";
+const TOKEN_AUDIT = "plugin::strapi-mcp-suite.token-audit";
 const API_TOKEN = "admin::api-token";
 
 describe("registerTokenAuditHooks — afterCreate", () => {

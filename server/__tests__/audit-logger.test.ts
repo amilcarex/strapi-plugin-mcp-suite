@@ -4,7 +4,7 @@ import * as assert from "node:assert/strict";
 import { logOperation } from "../services/audit/logger";
 import { buildAuditMockStrapi } from "./_audit-helpers";
 
-const OP_LOG = "plugin::strapi-mcp.op-log";
+const OP_LOG = "plugin::strapi-mcp-suite.op-log";
 
 describe("logOperation — happy path", () => {
   test("ok status: persists tool name, redacted args, result summary, duration, user, request", async () => {

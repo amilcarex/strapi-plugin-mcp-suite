@@ -36,7 +36,7 @@ export const healthTools: ToolDefinition[] = [
 
       return {
         ok: true,
-        plugin: "strapi-mcp",
+        plugin: "strapi-mcp-suite",
         plugin_version: PLUGIN_VERSION,
         strapi_version: (strapi as any).config?.info?.strapi ?? "unknown",
         server_time: now.toISOString(),

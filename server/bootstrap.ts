@@ -34,7 +34,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   const strapiVersion: string = (strapi as any).config?.info?.strapi ?? "unknown";
 
   strapi.log.info(
-    `[strapi-mcp] plugin loaded — endpoint /api/strapi-mcp/stream | strapi=${strapiVersion} | env=${env} | ${flagStatus("schema_authoring", authoring)} | ${flagStatus("upload", upload)} | ${flagStatus("graphql", graphql)}`
+    `[strapi-mcp] plugin loaded — endpoint /api/strapi-mcp-suite/stream | strapi=${strapiVersion} | env=${env} | ${flagStatus("schema_authoring", authoring)} | ${flagStatus("upload", upload)} | ${flagStatus("graphql", graphql)}`
   );
 
   // Warning para versiones <5.45: el campo `adminUserOwner` en api-tokens no
@@ -114,7 +114,7 @@ export default ({ strapi }: { strapi: Core.Strapi }) => {
   // En producción, runSelfTests es no-op (skip silencioso). Cero overhead.
   setImmediate(async () => {
     try {
-      const registry = strapi.plugin("strapi-mcp").service("registry") as any;
+      const registry = strapi.plugin("strapi-mcp-suite").service("registry") as any;
       if (registry?.runSelfTests) {
         const summary = await registry.runSelfTests();
         if (summary.tested > 0) {

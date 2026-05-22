@@ -13,6 +13,20 @@ All notable changes to `strapi-plugin-mcp` are documented here. Format follows [
 - Extend `strategy` resolution to `create_content_type` and `add_field_to_schema`
 - Investigate the `pnpm publish` 404 bug (granular token) so npm isn't the only working publish path
 
+## [0.6.2] - 2026-05-21
+
+### Fixed
+
+- **Plugin failed to boot when installed from npm — internal name mismatch.** The plugin's routes, policies, content-type UIDs and service lookups all referenced the internal name `strapi-mcp` (`plugin::strapi-mcp.rate-limit`, `plugin::strapi-mcp.op-log`, `strapi.plugin("strapi-mcp")`, …), but `package.json`'s `strapi.name` declared `strapi-plugin-mcp-suite`. Strapi v5 registers an installed plugin under `packageInfo.strapi.name`, so a clean install registered the plugin under a name that none of the hardcoded references matched — Strapi crashed at route registration with `Middleware plugin::strapi-mcp.rate-limit not found`. It only worked in the development project, where the plugin is loaded as a *local* plugin keyed `strapi-mcp` in `config/plugins.ts`.
+
+### Changed
+
+- **Internal plugin name unified to `strapi-mcp-suite`.** `strapi.name` and every internal reference (routes, policies, content-type UIDs, registry lookups) now use the single name `strapi-mcp-suite`. It was chosen over the shorter `strapi-mcp` deliberately: `strapi-mcp` is already taken by an unrelated standalone MCP server on npm and is generic enough to clash with other Strapi MCP plugins; `strapi-mcp-suite` is unique. Consequences:
+  - Installing from npm now produces a working plugin with **no `config/plugins` entry** — Strapi v5 auto-discovers it under `strapi-mcp-suite`.
+  - The content-API endpoint moved from `/api/strapi-mcp/stream` to **`/api/strapi-mcp-suite/stream`**.
+  - The forensic content-type UIDs are now `plugin::strapi-mcp-suite.op-log` / `plugin::strapi-mcp-suite.token-audit`. The **database tables are unchanged** (`mcp_op_logs`, `mcp_token_audits`) — `collectionName` is set explicitly, so existing audit data is preserved.
+  - Projects that load the plugin from a local clone must update the key in `config/plugins.ts` from `strapi-mcp` to `strapi-mcp-suite`.
+
 ## [0.6.1] - 2026-05-21
 
 ### Fixed

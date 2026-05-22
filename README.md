@@ -13,7 +13,7 @@
 ## TL;DR
 
 Drop this plugin into any Strapi v5 project, create an API token, point your MCP client at
-`/api/strapi-mcp/stream`. Your LLM can now read/write entries, reorganize admin UI layouts, generate
+`/api/strapi-mcp-suite/stream`. Your LLM can now read/write entries, reorganize admin UI layouts, generate
 components and content-types (opt-in), upload media (opt-in) and execute GraphQL queries (opt-in) —
 all through native Strapi APIs (`strapi.documents()`, lifecycle hooks, validation, draft & publish).
 
@@ -43,7 +43,7 @@ with delete-permission enforcement on tokens.
 Custom tools registered from your project bootstrap appear alongside the built-ins:
 
 ```ts
-strapi.plugin('strapi-mcp').service('registry').registerTool({
+strapi.plugin('strapi-mcp-suite').service('registry').registerTool({
   name: 'my_custom_tool',
   description: '...',
   inputSchema: { ... },
@@ -70,35 +70,19 @@ LLM.
 
 ## Installation
 
-Currently distributed via git only (npm publish coming soon):
-
 ```bash
-# Clone the plugin into your Strapi project
-cd <your-strapi-project>/src/plugins
-git clone https://github.com/amilcarex/strapi-plugin-mcp-suite.git strapi-mcp
-
-# Build the plugin's dist
-cd strapi-mcp
-npm install
-npm run build
+pnpm add strapi-plugin-mcp-suite
 ```
 
-Then enable it in `config/plugins.ts`:
-
-```ts
-export default {
-  'strapi-mcp': {
-    enabled: true,
-    resolve: './src/plugins/strapi-mcp',
-  },
-};
-```
-
+Strapi v5 auto-discovers the plugin — no `config/plugins` entry is required.
 Restart Strapi. You should see:
 
 ```
-[strapi-mcp] plugin loaded — endpoint /api/strapi-mcp/stream | strapi=5.46.0 | env=development | schema_authoring=disabled | upload=disabled | graphql=disabled
+[strapi-mcp] plugin loaded — endpoint /api/strapi-mcp-suite/stream | strapi=5.46.0 | env=development | schema_authoring=disabled | upload=disabled | graphql=disabled
 ```
+
+> Developing the plugin from source instead? See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+> local-clone setup.
 
 ---
 
@@ -126,7 +110,7 @@ Edit `~/.claude.json` or your client's config:
 {
   "mcpServers": {
     "strapi-local": {
-      "url": "http://localhost:1337/api/strapi-mcp/stream",
+      "url": "http://localhost:1337/api/strapi-mcp-suite/stream",
       "headers": {
         "Authorization": "Bearer YOUR_TOKEN_HERE"
       }
@@ -150,7 +134,7 @@ Support/Claude/claude_desktop_config.json` (macOS):
       "args": [
         "-y",
         "mcp-remote",
-        "http://localhost:1337/api/strapi-mcp/stream",
+        "http://localhost:1337/api/strapi-mcp-suite/stream",
         "--header",
         "Authorization:${AUTH_HEADER}"
       ],
@@ -209,7 +193,7 @@ jailbreak could turn it into an adversary. Defenses:
 
 - **Native Strapi API tokens** — no custom auth scheme to break. Reuses Strapi's hashing and
   storage.
-- **Granular permission enforcement** — Custom tokens must have `plugin::strapi-mcp.stream.handle`
+- **Granular permission enforcement** — Custom tokens must have `plugin::strapi-mcp-suite.stream.handle`
   explicitly marked. Tokens of type `Custom` without the MCP permission marked are rejected with
   `401 Custom token missing MCP permission`. `Full Access` and `Read Only` tokens pass by design
   (broader scope).
@@ -337,7 +321,7 @@ Custom tools live in your project's `src/index.ts` bootstrap:
 export default {
   register() {},
   bootstrap({ strapi }) {
-    strapi.plugin('strapi-mcp').service('registry').registerTool({
+    strapi.plugin('strapi-mcp-suite').service('registry').registerTool({
       name: 'feature_article',
       description: 'Marks an article as featured (sets is_featured=true and featured_at=now). Useful when an editor wants to highlight content without opening the admin.',
       inputSchema: {

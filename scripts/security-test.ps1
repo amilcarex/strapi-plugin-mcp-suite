@@ -20,7 +20,7 @@ if (-not $Token) {
 
 $script:Pass = 0
 $script:Fail = 0
-$Url = "$BaseUrl/api/strapi-mcp/stream"
+$Url = "$BaseUrl/api/strapi-mcp-suite/stream"
 
 function Check {
   param([string]$Name, [bool]$Condition, [string]$Detail = "")
@@ -81,7 +81,7 @@ function Invoke-Mcp {
 }
 
 Write-Host "=================================================="
-Write-Host "strapi-mcp SECURITY regression test"
+Write-Host "strapi-mcp-suite SECURITY regression test"
 Write-Host "Base: $BaseUrl"
 Write-Host "=================================================="
 
