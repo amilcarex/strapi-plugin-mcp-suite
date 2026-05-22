@@ -13,6 +13,12 @@ All notable changes to `strapi-plugin-mcp` are documented here. Format follows [
 - Extend `strategy` resolution to `create_content_type` and `add_field_to_schema`
 - Investigate the `pnpm publish` 404 bug (granular token) so npm isn't the only working publish path
 
+## [0.6.1] - 2026-05-21
+
+### Fixed
+
+- **Packaging: `@modelcontextprotocol/sdk` and `ajv` were not declared as dependencies.** The published package only declared `peerDependencies: { @strapi/strapi }` and no `dependencies` field at all — yet the plugin's runtime code imports `@modelcontextprotocol/sdk` (the MCP transport) and `ajv` (the registry's schema validator). Installing the plugin into a clean Strapi project pulled neither, so the plugin crashed at boot with `Cannot find module '@modelcontextprotocol/sdk/server/index.js'`. It only appeared to work in the development project because `@modelcontextprotocol/sdk` had been added there manually. Both are now declared in `dependencies` (`@modelcontextprotocol/sdk: ^1.29.0`, `ajv: ^8.0.0`), so `npm/pnpm install strapi-plugin-mcp-suite` produces a working install with no manual steps.
+
 ## [0.6.0] - 2026-05-21
 
 ### Added
