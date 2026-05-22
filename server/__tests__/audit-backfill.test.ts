@@ -4,7 +4,7 @@ import * as assert from "node:assert/strict";
 import { runBackfill } from "../services/audit/backfill";
 import { buildAuditMockStrapi } from "./_audit-helpers";
 
-const TOKEN_AUDIT = "plugin::strapi-mcp.token-audit";
+const TOKEN_AUDIT = "plugin::strapi-mcp-suite.token-audit";
 const API_TOKEN = "admin::api-token";
 
 describe("runBackfill", () => {

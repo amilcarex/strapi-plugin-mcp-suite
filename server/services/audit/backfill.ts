@@ -1,7 +1,7 @@
 import type { Core } from "@strapi/strapi";
 
 /**
- * Seeds `plugin::strapi-mcp.token-audit` rows for tokens that existed BEFORE
+ * Seeds `plugin::strapi-mcp-suite.token-audit` rows for tokens that existed BEFORE
  * the audit system was installed. Without this, those tokens would have no
  * audit row and the `beforeDelete` hook would (correctly) treat them as
  * unattributed legacy tokens — but the user wouldn't know they exist in the
@@ -15,7 +15,7 @@ import type { Core } from "@strapi/strapi";
  * to skip existing audits).
  */
 
-const TOKEN_AUDIT_UID = "plugin::strapi-mcp.token-audit" as any;
+const TOKEN_AUDIT_UID = "plugin::strapi-mcp-suite.token-audit" as any;
 const API_TOKEN_UID = "admin::api-token" as any;
 
 export async function runBackfill(strapi: Core.Strapi): Promise<{ inserted: number; total: number }> {

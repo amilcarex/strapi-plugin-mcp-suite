@@ -1,8 +1,8 @@
-// URL final: /api/strapi-mcp/stream (POST + GET)
+// URL final: /api/strapi-mcp-suite/stream (POST + GET)
 // Auth: API token vía header Authorization: Bearer <token>.
 
-const policies = ["plugin::strapi-mcp.require-api-token"];
-const middlewares = ["plugin::strapi-mcp.rate-limit"];
+const policies = ["plugin::strapi-mcp-suite.require-api-token"];
+const middlewares = ["plugin::strapi-mcp-suite.rate-limit"];
 
 export default {
   "content-api": {

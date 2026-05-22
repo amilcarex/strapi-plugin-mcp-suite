@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test del plugin strapi-mcp (Strapi5MCP).
+# Smoke test del plugin strapi-mcp-suite (Strapi5MCP).
 #
 # Uso:
 #   export STRAPI_MCP_TOKEN=tu-api-token
@@ -11,7 +11,7 @@
 #
 # Cubre:
 #   - Auth: 401 sin token, 401 con token bogus, 200 con token válido
-#   - MCP handshake: initialize devuelve {name: "strapi-mcp"}
+#   - MCP handshake: initialize devuelve {name: "strapi-mcp-suite"}
 #   - tools/list: cuenta tools según gating (SCHEMA_AUTHORING_ENABLED)
 #   - Content-ops read: list_content_types, get_content_type_schema
 #   - Layout-ops read: get_visual_layout
@@ -37,7 +37,7 @@ FAIL=0
 
 mcp_call() {
   local body="$1"
-  curl -sS -X POST "$BASE/api/strapi-mcp/stream" \
+  curl -sS -X POST "$BASE/api/strapi-mcp-suite/stream" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -H "Authorization: Bearer $TOKEN" \
@@ -62,7 +62,7 @@ check() {
 }
 
 echo "=========================================="
-echo "strapi-mcp smoke test"
+echo "strapi-mcp-suite smoke test"
 echo "Base: $BASE"
 echo "=========================================="
 
@@ -70,18 +70,18 @@ echo "=========================================="
 echo ""
 echo "→ Auth"
 
-resp=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/api/strapi-mcp/stream" \
+resp=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/api/strapi-mcp-suite/stream" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
 check "sin token → 401 (got $resp)" "$([ "$resp" = "401" ] && echo true || echo false)"
 
-resp=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/api/strapi-mcp/stream" \
+resp=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/api/strapi-mcp-suite/stream" \
   -H "Authorization: Bearer FAKE_TOKEN_THAT_DOES_NOT_EXIST" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
 check "token bogus → 401 (got $resp)" "$([ "$resp" = "401" ] && echo true || echo false)"
 
-resp=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/api/strapi-mcp/stream" \
+resp=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$BASE/api/strapi-mcp-suite/stream" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -93,7 +93,7 @@ echo ""
 echo "→ MCP handshake"
 
 init=$(mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke-test","version":"1.0"}}}' | extract_data)
-check "initialize devuelve serverInfo.name=strapi-mcp" "$(echo "$init" | grep -q '"name":"strapi-mcp"' && echo true || echo false)"
+check "initialize devuelve serverInfo.name=strapi-mcp-suite" "$(echo "$init" | grep -q '"name":"strapi-mcp-suite"' && echo true || echo false)"
 check "initialize incluye capabilities.tools" "$(echo "$init" | grep -q '"tools"' && echo true || echo false)"
 
 # ─── tools/list (with current gating) ────────────────────────────────────────

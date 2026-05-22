@@ -8,7 +8,7 @@ You need a Strapi v5 project to test against. The fastest path:
 
 ```bash
 # Create a fresh Strapi project (or use an existing one)
-npx create-strapi@latest test-strapi --quickstart --no-run
+pnpm dlx create-strapi@latest test-strapi --quickstart --no-run
 
 # Clone this plugin into it
 cd test-strapi
@@ -16,15 +16,15 @@ git clone https://github.com/amilcarex/strapi-plugin-mcp-suite.git src/plugins/s
 
 # Build the plugin
 cd src/plugins/strapi-mcp
-npm install
-npm run build
+pnpm install
+pnpm run build
 
 # Enable the plugin
 cd ../../..
-# edit config/plugins.ts and add the 'strapi-mcp' entry
+# edit config/plugins.ts and add the 'strapi-mcp-suite' entry
 
 # Run Strapi
-npm run develop
+pnpm run develop
 ```
 
 Look for `[strapi-mcp] plugin loaded` in the boot log.
@@ -35,7 +35,7 @@ Look for `[strapi-mcp] plugin loaded` in the boot log.
 
 ```bash
 cd src/plugins/strapi-mcp
-npm test
+pnpm test
 ```
 
 145+ tests covering the core modules. They run in ~200ms and don't need a running Strapi.
@@ -70,7 +70,7 @@ src/plugins/strapi-mcp/
     ├── index.ts                  ← composes everything
     ├── bootstrap.ts              ← runs on Strapi boot (logs, self-tests)
     ├── register.ts, destroy.ts
-    ├── routes/index.ts           ← /api/strapi-mcp/stream (GET + POST)
+    ├── routes/index.ts           ← /api/strapi-mcp-suite/stream (GET + POST)
     ├── controllers/stream.ts     ← Koa ↔ MCP transport bridge
     ├── middlewares/rate-limit.ts ← 3-layer sliding window
     ├── policies/require-api-token.ts ← native Strapi API token auth
@@ -125,7 +125,7 @@ src/plugins/strapi-mcp/
 You don't need to fork the plugin. From your project's `src/index.ts` bootstrap:
 
 ```ts
-strapi.plugin('strapi-mcp').service('registry').registerTool({
+strapi.plugin('strapi-mcp-suite').service('registry').registerTool({
   name: 'my_project_tool',
   description: '...',
   inputSchema: { ... },
@@ -149,7 +149,7 @@ The registry validates the shape and runs `testCases` automatically in dev. See 
 
 1. Open an issue first if it's a non-trivial change, so we can align on approach.
 2. Branch from `main`. Name it `fix/short-desc`, `feat/short-desc`, `docs/...`, `security/...`.
-3. Make sure unit tests pass: `npm test`.
+3. Make sure unit tests pass: `pnpm test`.
 4. If the change touches behavior visible from MCP clients, update the README and/or CHANGELOG.
 5. If you're adding a security-relevant change, also update `scripts/security-test.ps1` and `.sh` with a regression case.
 

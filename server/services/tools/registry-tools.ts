@@ -27,7 +27,7 @@ export const registryTools: ToolDefinition[] = [
       additionalProperties: false,
     },
     handler: async ({ strapi }, args: any) => {
-      const registry = strapi.plugin("strapi-mcp").service("registry") as any;
+      const registry = strapi.plugin("strapi-mcp-suite").service("registry") as any;
 
       const customTools = (registry.getTools?.() ?? []) as ToolDefinition[];
       const summaries = registry.getLastTestSummaries?.() ?? {};

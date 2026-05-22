@@ -1,7 +1,7 @@
 import type { Core } from "@strapi/strapi";
 
 /**
- * Bounded retention for `plugin::strapi-mcp.op-log`.
+ * Bounded retention for `plugin::strapi-mcp-suite.op-log`.
  *
  * Two limits, evaluated in order on each tick:
  *   1. AGE — delete rows older than `MCP_AUDIT_RETENTION_DAYS` (default 90).
@@ -22,7 +22,7 @@ import type { Core } from "@strapi/strapi";
  *     early signal that the job is configured correctly.
  */
 
-const OP_LOG_UID = "plugin::strapi-mcp.op-log" as any;
+const OP_LOG_UID = "plugin::strapi-mcp-suite.op-log" as any;
 const BATCH_SIZE = 1000;
 
 export interface CleanupOptions {

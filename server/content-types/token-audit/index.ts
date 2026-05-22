@@ -1,5 +1,5 @@
 /**
- * `plugin::strapi-mcp.token-audit` — 1 fila por API token observado.
+ * `plugin::strapi-mcp-suite.token-audit` — 1 fila por API token observado.
  *
  * Forensic trail: who created each token, when, and (if applicable) who deleted
  * it. Created via lifecycle hooks on `admin::api-token` (afterCreate /

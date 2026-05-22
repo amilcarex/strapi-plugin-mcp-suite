@@ -109,7 +109,7 @@ export default async (
   //   - "full-access": tiene acceso a TODO sin restricción → pasa siempre
   //   - "read-only": tiene acceso a lecturas de toda la app → pasa (defensiva)
   //   - "custom": solo tiene los permisos explícitamente marcados → debe tener
-  //     el permiso `plugin::strapi-mcp.stream.handle` (o el que Strapi haya
+  //     el permiso `plugin::strapi-mcp-suite.stream.handle` (o el que Strapi haya
   //     registrado para la ruta del MCP)
   //
   // Esto cierra el gap "alguien crea un token Custom marcando solo permisos
@@ -127,11 +127,11 @@ export default async (
 
     // Strapi registra la ruta como acción del plugin con el patrón
     // `plugin::<plugin-name>.<controller>.<action>`. Para este plugin:
-    // `plugin::strapi-mcp.stream.handle`. Si Strapi renombra los plugin names
+    // `plugin::strapi-mcp-suite.stream.handle`. Si Strapi renombra los plugin names
     // (ej: el dev configura el plugin con otro key), también aceptamos cualquier
     // acción que matchee el patrón `plugin::*.stream.handle` para defensiva.
     const hasMcpPermission = actions.some((action) =>
-      action === "plugin::strapi-mcp.stream.handle" ||
+      action === "plugin::strapi-mcp-suite.stream.handle" ||
       /^plugin::[\w-]+\.stream\.handle$/.test(action)
     );
 

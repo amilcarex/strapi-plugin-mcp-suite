@@ -9,7 +9,7 @@ import { runTestCasesFor, formatSummary, isProduction, type ToolTestSummary } fr
  *
  * ─── Estructura estándar de una tool ─────────────────────────────────────────
  *
- *   strapi.plugin('strapi-mcp').service('registry').registerTool({
+ *   strapi.plugin('strapi-mcp-suite').service('registry').registerTool({
  *     name: 'my_custom_tool',                       // snake_case, único, no built-in
  *     description: 'Hace X cuando el usuario Y...', // ≥ 30 chars, claro para el LLM
  *     inputSchema: {
