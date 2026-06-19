@@ -61,6 +61,7 @@ const BUILTIN_TOOL_NAMES = new Set<string>([
   "delete_entry",
   "publish_entry",
   "unpublish_entry",
+  "discard_draft",
   // layout-ops
   "get_visual_layout",
   "set_field_layout",

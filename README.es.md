@@ -25,6 +25,47 @@ con enforcement de permisos para eliminar tokens.
 
 ---
 
+## Convivencia con el MCP nativo de Strapi (5.47+)
+
+Strapi 5.47 trajo un **servidor MCP nativo** (`/mcp`) que genera tools de CRUD a partir de tu
+schema. Este plugin está pensado para **complementarlo, no competir con él**: el nativo se queda con
+el CRUD commodity, y el plugin se enfoca en lo que el nativo **no** hace — creación de schemas,
+configuración visual del admin, uploads de media, GraphQL y un audit trail forense.
+
+Controlas la convivencia con el setting `coexistence` (o el override por env `MCP_COEXISTENCE`):
+
+| Modo | Comportamiento |
+|---|---|
+| **`auto`** *(default)* | Si detecta el MCP nativo sirviendo (Strapi ≥ 5.47 **y** `server.mcp.enabled === true`), el plugin **auto-suprime sus tools de CRUD** (`find_entries`, `create_entry`, …) para que el LLM no vea duplicados. Si no hay nativo, el plugin sirve todo. |
+| **`standalone`** | Ignora el nativo; el plugin sirve todas sus tools en su propio endpoint (úsalo si quieres el CRUD del plugin aunque el nativo esté activo). |
+| **`extend-native`** | Registra los **diferenciadores del plugin dentro del nativo** (`strapi.ai.mcp`), así un único `/mcp` sirve CRUD nativo **+** schema authoring + layout + media/graphql. Un endpoint, una auth (los admin tokens del nativo). |
+
+> **Nota sobre auth:** el MCP nativo autentica con **admin tokens** (creados en *Settings → Admin
+> Tokens*), mientras que el endpoint standalone del plugin usa **API tokens de contenido**. No son
+> intercambiables. En modo `extend-native` las tools bridged corren bajo la auth de admin tokens del nativo.
+
+```ts
+// config/plugins.ts
+export default {
+  'strapi-mcp-suite': {
+    enabled: true,
+    config: {
+      coexistence: 'auto',     // 'auto' | 'standalone' | 'extend-native'
+      contentOps: true,        // tools de CRUD (auto-suprimidas al convivir)
+      schemaAuthoring: false,
+      upload: false,
+      graphql: false,
+    },
+  },
+};
+```
+
+El gating es **config-driven** (precedencia: defaults del plugin → `config/plugins.ts` → override por
+env). Las env vars (`CONTENT_OPS_ENABLED`, `SCHEMA_AUTHORING_ENABLED`, `UPLOAD_ENABLED`,
+`GRAPHQL_ENABLED`, `MCP_COEXISTENCE`) siguen funcionando y ganan sobre la config.
+
+---
+
 ## Features
 
 ### Tools built-in (33 en total, agrupadas por capacidad)

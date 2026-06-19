@@ -10,6 +10,9 @@ function getTool(name: string) {
   return t;
 }
 
+// Token full-access: las mutaciones ahora exigen auth (punto 4). Los reads lo ignoran.
+const FULL_AUTH = { credentials: { type: "full-access" } } as any;
+
 describe("content-ops: assertContentType", () => {
   test("find_entries rechaza uid que no es api::*", async () => {
     const strapi = makeMockStrapi({
@@ -19,7 +22,7 @@ describe("content-ops: assertContentType", () => {
     });
     const tool = getTool("find_entries");
     await assert.rejects(
-      tool.handler({ strapi: strapi as any }, { uid: "admin::user" } as any),
+      tool.handler({ strapi: strapi as any, auth: FULL_AUTH }, { uid: "admin::user" } as any),
       /internos? de Strapi|no existe/i
     );
   });
@@ -28,7 +31,7 @@ describe("content-ops: assertContentType", () => {
     const strapi = makeMockStrapi();
     const tool = getTool("find_entries");
     await assert.rejects(
-      tool.handler({ strapi: strapi as any }, { uid: "api::ghost.ghost" } as any),
+      tool.handler({ strapi: strapi as any, auth: FULL_AUTH }, { uid: "api::ghost.ghost" } as any),
       /no existe/
     );
   });
@@ -49,7 +52,7 @@ describe("content-ops: find_entries pageSize cap (M1)", () => {
     });
     const tool = getTool("find_entries");
     const result: any = await tool.handler(
-      { strapi: strapi as any },
+      { strapi: strapi as any, auth: FULL_AUTH },
       { uid: "api::article.article", pagination: { page: 1, pageSize: 100000 } } as any
     );
     assert.equal(captured.limit, 200, "limit pasado a strapi.documents debe ser 200");
@@ -68,7 +71,7 @@ describe("content-ops: find_entries pageSize cap (M1)", () => {
     });
     const tool = getTool("find_entries");
     const result: any = await tool.handler(
-      { strapi: strapi as any },
+      { strapi: strapi as any, auth: FULL_AUTH },
       { uid: "api::article.article" } as any
     );
     assert.equal(result.pagination.pageSize, 25);
@@ -82,7 +85,7 @@ describe("content-ops: find_entries pageSize cap (M1)", () => {
     });
     const tool = getTool("find_entries");
     const result: any = await tool.handler(
-      { strapi: strapi as any },
+      { strapi: strapi as any, auth: FULL_AUTH },
       { uid: "api::article.article", pagination: { page: 1, pageSize: -10 } } as any
     );
     assert.equal(result.pagination.pageSize, 1);
@@ -97,7 +100,7 @@ describe("content-ops: delete_entry confirm flag", () => {
     const tool = getTool("delete_entry");
     await assert.rejects(
       tool.handler(
-        { strapi: strapi as any },
+        { strapi: strapi as any, auth: FULL_AUTH },
         { uid: "api::article.article", documentId: "x", confirm: false } as any
       ),
       /confirm:true/
@@ -117,7 +120,7 @@ describe("content-ops: delete_entry confirm flag", () => {
     });
     const tool = getTool("delete_entry");
     const result: any = await tool.handler(
-      { strapi: strapi as any },
+      { strapi: strapi as any, auth: FULL_AUTH },
       { uid: "api::article.article", documentId: "x", confirm: true } as any
     );
     assert.equal(deleted, true);
@@ -138,7 +141,7 @@ describe("content-ops: publish/unpublish requiere D&P", () => {
     const tool = getTool("publish_entry");
     await assert.rejects(
       tool.handler(
-        { strapi: strapi as any },
+        { strapi: strapi as any, auth: FULL_AUTH },
         { uid: "api::article.article", documentId: "x", confirm: true } as any
       ),
       /draftAndPublish/
@@ -163,7 +166,7 @@ describe("content-ops: publish/unpublish requiere D&P", () => {
     });
     const tool = getTool("publish_entry");
     const result: any = await tool.handler(
-      { strapi: strapi as any },
+      { strapi: strapi as any, auth: FULL_AUTH },
       { uid: "api::article.article", documentId: "x", confirm: true } as any
     );
     assert.equal(published, true);
@@ -204,7 +207,7 @@ describe("content-ops: find_entries populate_deep", () => {
     const { strapi, captured } = buildStrapiWithPage();
     const tool = getTool("find_entries");
     await tool.handler(
-      { strapi: strapi as any },
+      { strapi: strapi as any, auth: FULL_AUTH },
       { uid: "api::page.page", populate_deep: true, populate_depth: 4 } as any
     );
     assert.ok(captured.query.populate, "populate debe ser objeto, no undefined");
@@ -216,7 +219,7 @@ describe("content-ops: find_entries populate_deep", () => {
     const { strapi, captured } = buildStrapiWithPage();
     const tool = getTool("find_entries");
     const result: any = await tool.handler(
-      { strapi: strapi as any },
+      { strapi: strapi as any, auth: FULL_AUTH },
       {
         uid: "api::page.page",
         populate_deep: true,
@@ -233,7 +236,7 @@ describe("content-ops: find_entries populate_deep", () => {
     const { strapi, captured } = buildStrapiWithPage();
     const tool = getTool("find_entries");
     await tool.handler(
-      { strapi: strapi as any },
+      { strapi: strapi as any, auth: FULL_AUTH },
       { uid: "api::page.page", populate: "*" } as any
     );
     assert.equal(captured.query.populate, "*");
@@ -243,7 +246,7 @@ describe("content-ops: find_entries populate_deep", () => {
     const { strapi, captured } = buildStrapiWithPage();
     const tool = getTool("find_entries");
     await tool.handler(
-      { strapi: strapi as any },
+      { strapi: strapi as any, auth: FULL_AUTH },
       { uid: "api::page.page" } as any
     );
     assert.equal(captured.query.populate, undefined);
@@ -254,7 +257,7 @@ describe("content-ops: find_entries populate_deep", () => {
     const tool = getTool("find_entries");
     // depth=99 — el JSON schema lo rechazaría, pero el clamp interno lo capa a 6
     await tool.handler(
-      { strapi: strapi as any },
+      { strapi: strapi as any, auth: FULL_AUTH },
       { uid: "api::page.page", populate_deep: true, populate_depth: 99 } as any
     );
     assert.ok(captured.query.populate, "debe generar tree aunque depth esté fuera de rango");
@@ -283,7 +286,7 @@ describe("content-ops: get_entry populate_deep", () => {
     });
     const tool = getTool("get_entry");
     const result: any = await tool.handler(
-      { strapi: strapi as any },
+      { strapi: strapi as any, auth: FULL_AUTH },
       {
         uid: "api::article.article",
         documentId: "x",
@@ -308,7 +311,7 @@ describe("content-ops: get_entry populate_deep", () => {
     });
     const tool = getTool("get_entry");
     await tool.handler(
-      { strapi: strapi as any },
+      { strapi: strapi as any, auth: FULL_AUTH },
       { uid: "api::article.article", documentId: "x", populate: "*" } as any
     );
     assert.equal(captured.query.populate, "*");

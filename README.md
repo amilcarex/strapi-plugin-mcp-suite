@@ -24,6 +24,47 @@ with delete-permission enforcement on tokens.
 
 ---
 
+## Coexistence with Strapi's native MCP server (5.47+)
+
+Strapi 5.47 introduced a **native MCP server** (`/mcp`) that generates content CRUD tools from your
+schema. This plugin is designed to **complement, not compete with** it: the native server owns the
+commodity CRUD, while this plugin focuses on what the native server does **not** do — schema
+authoring, visual layout configuration, media uploads, GraphQL, and a forensic audit trail.
+
+Control how they coexist with the `coexistence` setting (or the `MCP_COEXISTENCE` env override):
+
+| Mode | Behavior |
+|---|---|
+| **`auto`** *(default)* | If the native MCP is detected serving (Strapi ≥ 5.47 **and** `server.mcp.enabled === true`), the plugin **auto-suppresses its CRUD tools** (`find_entries`, `create_entry`, …) so the LLM never sees duplicates. If there's no native MCP, the plugin serves everything. |
+| **`standalone`** | Ignores the native server; the plugin serves all enabled tools on its own endpoint (use this if you want the plugin's CRUD even alongside the native one). |
+| **`extend-native`** | Registers the plugin's **differentiators into the native server** (`strapi.ai.mcp`), so a single `/mcp` endpoint serves native CRUD **+** schema authoring + layout + media/graphql. One endpoint, one auth (the native admin tokens). |
+
+> **Note on auth:** the native MCP authenticates with **admin tokens** (created in *Settings → Admin
+> Tokens*), while this plugin's standalone endpoint uses **content API tokens**. They are not
+> interchangeable. In `extend-native` mode the bridged tools run under the native admin-token auth.
+
+```ts
+// config/plugins.ts
+export default {
+  'strapi-mcp-suite': {
+    enabled: true,
+    config: {
+      coexistence: 'auto',     // 'auto' | 'standalone' | 'extend-native'
+      contentOps: true,        // CRUD tools (auto-suppressed when coexisting)
+      schemaAuthoring: false,
+      upload: false,
+      graphql: false,
+    },
+  },
+};
+```
+
+Gating is **config-driven** (precedence: built-in defaults → `config/plugins.ts` → env override).
+The env vars (`CONTENT_OPS_ENABLED`, `SCHEMA_AUTHORING_ENABLED`, `UPLOAD_ENABLED`, `GRAPHQL_ENABLED`,
+`MCP_COEXISTENCE`) still work and win over config.
+
+---
+
 ## Features
 
 ### Built-in tools (33 total, organized by capability)
