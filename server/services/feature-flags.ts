@@ -120,3 +120,129 @@ export function resolveFeatureFlags(strapi: Core.Strapi): FeatureFlags {
   });
   return applyEnvOverrides(configFlags, process.env);
 }
+
+/* ─── Coexistencia con el MCP nativo de Strapi 5.47+ (punto 2) ──────────────── */
+
+/**
+ * Modos de convivencia:
+ *   - "auto" (default): si se detecta el MCP nativo activo, se suprime contentOps
+ *     automáticamente para no exponer tools de CRUD duplicadas. Sin tocar config.
+ *   - "standalone": ignora el nativo; el plugin sirve lo que digan los flags
+ *     (útil si querés el CRUD del plugin aunque el nativo esté prendido).
+ *   - "extend-native": reservado para el punto 3 (registrar las tools en
+ *     `strapi.ai.mcp`). De cara a la supresión se comporta como "auto".
+ */
+export type CoexistenceMode = "auto" | "standalone" | "extend-native";
+export const COEXISTENCE_MODES: CoexistenceMode[] = ["auto", "standalone", "extend-native"];
+export const DEFAULT_COEXISTENCE: CoexistenceMode = "auto";
+export const COEXISTENCE_ENV = "MCP_COEXISTENCE";
+
+/** Parsea "5.47.0" → [5,47,0]. Devuelve null si no parsea. */
+function parseVersion(v: unknown): [number, number, number] | null {
+  if (typeof v !== "string") return null;
+  const m = v.match(/(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+/** ¿`version` >= `min`? Función pura. */
+export function versionGte(version: unknown, min: string): boolean {
+  const a = parseVersion(version);
+  const b = parseVersion(min);
+  if (a === null || b === null) return false;
+  for (let i = 0; i < 3; i++) {
+    if (a[i] > b[i]) return true;
+    if (a[i] < b[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * ¿Está el MCP nativo de Strapi sirviendo? Requiere dos condiciones:
+ *   1. Strapi >= 5.47.0 (antes no existe la capability), y
+ *   2. `server.mcp.enabled === true` (resuelto, incluye defaults del core).
+ * En <5.47 nunca devuelve true → jamás auto-suprime sin que haya un nativo real.
+ */
+export function isNativeMcpActive(strapi: Core.Strapi): boolean {
+  const version = (strapi.config as any)?.info?.strapi;
+  if (!versionGte(version, "5.47.0")) return false;
+  let enabled: unknown;
+  try {
+    enabled = (strapi.config as any)?.get?.("server.mcp.enabled");
+  } catch {
+    enabled = undefined;
+  }
+  return enabled === true;
+}
+
+/** Lee el modo de coexistencia: default → config → env override (MCP_COEXISTENCE). */
+export function resolveCoexistence(strapi: Core.Strapi): CoexistenceMode {
+  let mode: CoexistenceMode = DEFAULT_COEXISTENCE;
+  try {
+    const plugin: any = strapi.plugin("strapi-mcp-suite");
+    const fromCfg =
+      typeof plugin?.config === "function"
+        ? plugin.config("coexistence")
+        : (strapi.config as any)?.get?.("plugin::strapi-mcp-suite.coexistence");
+    if (typeof fromCfg === "string" && (COEXISTENCE_MODES as string[]).includes(fromCfg)) {
+      mode = fromCfg as CoexistenceMode;
+    }
+  } catch {
+    /* noop */
+  }
+  const envMode = process.env[COEXISTENCE_ENV];
+  if (typeof envMode === "string" && (COEXISTENCE_MODES as string[]).includes(envMode)) {
+    mode = envMode as CoexistenceMode;
+  }
+  return mode;
+}
+
+/**
+ * Aplica la política de coexistencia sobre los flags. Función pura.
+ *
+ * Suprime contentOps cuando: el modo NO es "standalone", el nativo está activo,
+ * contentOps estaba on, y NO hay un override explícito de env forzándolo (true).
+ * El override de env y el modo "standalone" son las dos vías de escape.
+ */
+export function applyCoexistence(
+  flags: FeatureFlags,
+  opts: {
+    coexistence: CoexistenceMode;
+    nativeActive: boolean;
+    envContentOps: boolean | undefined;
+  }
+): { flags: FeatureFlags; contentOpsSuppressed: boolean } {
+  const out: FeatureFlags = { ...flags };
+  const suppress =
+    opts.coexistence !== "standalone" &&
+    opts.nativeActive &&
+    out.contentOps === true &&
+    opts.envContentOps !== true;
+  if (suppress) out.contentOps = false;
+  return { flags: out, contentOpsSuppressed: suppress };
+}
+
+export interface RuntimeFlags {
+  flags: FeatureFlags;
+  coexistence: CoexistenceMode;
+  nativeActive: boolean;
+  contentOpsSuppressed: boolean;
+}
+
+/**
+ * Flags efectivos en runtime: resuelve feature flags + aplica coexistencia con
+ * el MCP nativo. Es lo que debe usar el server para decidir qué tools exponer.
+ */
+export function resolveRuntimeFlags(strapi: Core.Strapi): RuntimeFlags {
+  const flags = resolveFeatureFlags(strapi);
+  const coexistence = resolveCoexistence(strapi);
+  const nativeActive = isNativeMcpActive(strapi);
+  const envContentOps = parseBoolEnv(process.env.CONTENT_OPS_ENABLED);
+  const applied = applyCoexistence(flags, { coexistence, nativeActive, envContentOps });
+  return {
+    flags: applied.flags,
+    coexistence,
+    nativeActive,
+    contentOpsSuppressed: applied.contentOpsSuppressed,
+  };
+}

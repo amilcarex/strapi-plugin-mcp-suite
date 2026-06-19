@@ -6,6 +6,11 @@ import {
   parseBoolEnv,
   applyEnvOverrides,
   resolveFeatureFlags,
+  versionGte,
+  isNativeMcpActive,
+  resolveCoexistence,
+  applyCoexistence,
+  DEFAULT_COEXISTENCE,
   type FeatureFlags,
 } from "../services/feature-flags";
 
@@ -129,5 +134,155 @@ describe("feature-flags: resolveFeatureFlags (default → config → env)", () =
     } finally {
       delete process.env.CONTENT_OPS_ENABLED;
     }
+  });
+});
+
+/* ─── Punto 2: coexistencia con el MCP nativo ──────────────────────────────── */
+
+describe("feature-flags: versionGte", () => {
+  test("compara semver correctamente", () => {
+    assert.equal(versionGte("5.47.0", "5.47.0"), true);
+    assert.equal(versionGte("5.48.1", "5.47.0"), true);
+    assert.equal(versionGte("5.46.0", "5.47.0"), false);
+    assert.equal(versionGte("6.0.0", "5.47.0"), true);
+    assert.equal(versionGte("5.47.0-beta.1", "5.47.0"), true); // matchea 5.47.0
+  });
+
+  test("input inválido → false (fail-safe)", () => {
+    assert.equal(versionGte(undefined, "5.47.0"), false);
+    assert.equal(versionGte("unknown", "5.47.0"), false);
+    assert.equal(versionGte(547, "5.47.0"), false);
+  });
+});
+
+describe("feature-flags: isNativeMcpActive", () => {
+  function makeStrapi(version: string | undefined, mcpEnabled: unknown): any {
+    return {
+      config: {
+        info: { strapi: version },
+        get(path: string) {
+          if (path === "server.mcp.enabled") return mcpEnabled;
+          return undefined;
+        },
+      },
+    };
+  }
+
+  test("5.48 + server.mcp.enabled=true → activo", () => {
+    assert.equal(isNativeMcpActive(makeStrapi("5.48.1", true)), true);
+  });
+
+  test("5.47 pero enabled!=true → inactivo", () => {
+    assert.equal(isNativeMcpActive(makeStrapi("5.47.0", false)), false);
+    assert.equal(isNativeMcpActive(makeStrapi("5.47.0", undefined)), false);
+  });
+
+  test("<5.47 aunque enabled=true → inactivo (no existe el nativo)", () => {
+    assert.equal(isNativeMcpActive(makeStrapi("5.46.0", true)), false);
+  });
+});
+
+describe("feature-flags: resolveCoexistence", () => {
+  function makeStrapi(cfg: unknown): any {
+    return {
+      plugin(name: string) {
+        if (name !== "strapi-mcp-suite") return null;
+        return { config: (k: string) => (k === "coexistence" ? cfg : undefined) };
+      },
+      config: { get: () => undefined },
+    };
+  }
+
+  test("sin config → default 'auto'", () => {
+    delete process.env.MCP_COEXISTENCE;
+    assert.equal(resolveCoexistence(makeStrapi(undefined)), DEFAULT_COEXISTENCE);
+    assert.equal(resolveCoexistence(makeStrapi(undefined)), "auto");
+  });
+
+  test("config válida se respeta", () => {
+    delete process.env.MCP_COEXISTENCE;
+    assert.equal(resolveCoexistence(makeStrapi("standalone")), "standalone");
+  });
+
+  test("valor inválido cae al default", () => {
+    delete process.env.MCP_COEXISTENCE;
+    assert.equal(resolveCoexistence(makeStrapi("garbage")), "auto");
+  });
+
+  test("env MCP_COEXISTENCE override gana sobre config", () => {
+    process.env.MCP_COEXISTENCE = "standalone";
+    try {
+      assert.equal(resolveCoexistence(makeStrapi("auto")), "standalone");
+    } finally {
+      delete process.env.MCP_COEXISTENCE;
+    }
+  });
+});
+
+describe("feature-flags: applyCoexistence (auto-supresión de contentOps)", () => {
+  const base: FeatureFlags = {
+    contentOps: true,
+    schemaAuthoring: true,
+    upload: false,
+    graphql: false,
+  };
+
+  test("auto + nativo activo → suprime contentOps", () => {
+    const { flags, contentOpsSuppressed } = applyCoexistence(base, {
+      coexistence: "auto",
+      nativeActive: true,
+      envContentOps: undefined,
+    });
+    assert.equal(flags.contentOps, false);
+    assert.equal(contentOpsSuppressed, true);
+    // no toca los demás flags
+    assert.equal(flags.schemaAuthoring, true);
+  });
+
+  test("auto + nativo INACTIVO → no suprime", () => {
+    const { flags, contentOpsSuppressed } = applyCoexistence(base, {
+      coexistence: "auto",
+      nativeActive: false,
+      envContentOps: undefined,
+    });
+    assert.equal(flags.contentOps, true);
+    assert.equal(contentOpsSuppressed, false);
+  });
+
+  test("standalone + nativo activo → NO suprime (escape hatch)", () => {
+    const { flags, contentOpsSuppressed } = applyCoexistence(base, {
+      coexistence: "standalone",
+      nativeActive: true,
+      envContentOps: undefined,
+    });
+    assert.equal(flags.contentOps, true);
+    assert.equal(contentOpsSuppressed, false);
+  });
+
+  test("env CONTENT_OPS_ENABLED=true fuerza contentOps aunque el nativo esté activo", () => {
+    const { flags, contentOpsSuppressed } = applyCoexistence(base, {
+      coexistence: "auto",
+      nativeActive: true,
+      envContentOps: true,
+    });
+    assert.equal(flags.contentOps, true);
+    assert.equal(contentOpsSuppressed, false);
+  });
+
+  test("extend-native se comporta como auto (suprime)", () => {
+    const { contentOpsSuppressed } = applyCoexistence(base, {
+      coexistence: "extend-native",
+      nativeActive: true,
+      envContentOps: undefined,
+    });
+    assert.equal(contentOpsSuppressed, true);
+  });
+
+  test("si contentOps ya estaba off, no marca supresión", () => {
+    const { contentOpsSuppressed } = applyCoexistence(
+      { ...base, contentOps: false },
+      { coexistence: "auto", nativeActive: true, envContentOps: undefined }
+    );
+    assert.equal(contentOpsSuppressed, false);
   });
 });

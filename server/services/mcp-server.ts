@@ -7,7 +7,7 @@ import {
 
 import type { ToolDefinition } from "./tools/types";
 import { PLUGIN_NAME, PLUGIN_VERSION } from "../plugin-meta";
-import { resolveFeatureFlags } from "./feature-flags";
+import { resolveRuntimeFlags } from "./feature-flags";
 import { schemaAuthoringTools } from "./tools/schema-authoring";
 import { contentOpsTools } from "./tools/content-ops";
 import { layoutOpsTools } from "./tools/layout-ops";
@@ -42,6 +42,10 @@ import { logOperation } from "./audit/logger";
  * Tools custom registradas via `strapi.plugin('strapi-mcp-suite').service('registry')
  * .registerTool(...)` se agregan al array final.
  */
+// Guard de proceso: createMcpServer corre por request, así que logueamos el
+// estado de coexistencia una sola vez para no inundar los logs.
+let coexistenceLogged = false;
+
 export interface McpServerContext {
   auth?: any;
   user?: any;
@@ -68,8 +72,21 @@ export function createMcpServer(strapi: Core.Strapi, ctx: McpServerContext = {})
 
   const tools: ToolDefinition[] = [];
 
-  // Flags resueltos: default → config del plugin → env override.
-  const flags = resolveFeatureFlags(strapi);
+  // Flags resueltos: default → config → env override, + coexistencia con el
+  // MCP nativo (auto-supresión de contentOps si el nativo está activo).
+  const { flags, nativeActive, contentOpsSuppressed } = resolveRuntimeFlags(strapi);
+  if (contentOpsSuppressed && !coexistenceLogged) {
+    coexistenceLogged = true;
+    strapi.log.info(
+      '[strapi-mcp] MCP nativo activo (server.mcp.enabled) — contentOps auto-suprimido para no duplicar el CRUD. ' +
+        'Forzá el CRUD del plugin con coexistence:"standalone" o CONTENT_OPS_ENABLED=true.'
+    );
+  } else if (nativeActive && flags.contentOps && !coexistenceLogged) {
+    coexistenceLogged = true;
+    strapi.log.info(
+      "[strapi-mcp] MCP nativo activo pero contentOps sigue ON (coexistence:standalone o CONTENT_OPS_ENABLED=true) — habrá tools de CRUD duplicadas con el nativo."
+    );
+  }
 
   // Schema authoring: opt-in.
   if (flags.schemaAuthoring) {
