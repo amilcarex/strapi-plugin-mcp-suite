@@ -1,6 +1,6 @@
 {
   "name": "strapi-plugin-mcp-suite",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "description": "MCP server plugin for Strapi v5: generic content management, visual layout config, schema authoring, media uploads and GraphQL — with native API token auth, multi-layer rate limiting and a forensic audit trail (token lifecycle + every operation). Production-ready.",
   "exports": {
     "./strapi-server": "./dist/strapi-server.js",
@@ -21,7 +21,7 @@
     "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('dist-tests',{recursive:true,force:true})\"",
     "test": "tsc -p tsconfig.test.json && node --test --test-reporter=spec \"dist-tests/server/__tests__/*.test.js\"",
     "test:watch": "tsc -p tsconfig.test.json --watch & node --test --watch \"dist-tests/server/__tests__/*.test.js\"",
-    "prepublishOnly": "npm run clean && npm run build && npm test"
+    "prepublishOnly": "pnpm run clean && pnpm run build && pnpm test"
   },
   "strapi": {
     "name": "strapi-mcp-suite",

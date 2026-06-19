@@ -4,6 +4,17 @@ All notable changes to `strapi-plugin-mcp` are documented here. Format follows [
 
 ## [Unreleased]
 
+### Planned
+- Log noise cleanup: 401/403/429 from the auth policy and rate-limit middleware should log as a single-line `warn`, not `error` with a stack trace. Deferred from 0.6.0 — the fix touches the security-critical `require-api-token` policy and wasn't worth the regression risk for a cosmetic gain.
+- Redis backend for multi-instance rate limiting
+- `delete_content_type` with multi-step confirmation
+- i18n-specific tools
+- Admin UI panel for browsing the audit log
+- Extend `strategy` resolution to `create_content_type` and `add_field_to_schema`
+- Field-level / condition-based permission parity with the native MCP (current enforcement is token-type + custom-action level)
+
+## [0.7.0] - 2026-06-18
+
 ### Security
 
 - **Los content-ops ahora respetan el tipo/permisos del API token.** El endpoint del plugin usa su propia policy (saltándose el middleware de permisos por-ruta de Strapi), así que hasta ahora un token **read-only** podía crear/editar/borrar/publicar vía MCP — una vía de escalación. Nuevo guard `assertCanMutate` en las 6 mutaciones (`create/update/delete/publish/unpublish/discard`): `full-access` permite, `read-only` **bloquea** (fail-closed), `custom` exige la action correspondiente en sus permisos (si se resuelven), y sin token / tipo desconocido **bloquea**. Solo aplica al endpoint standalone (al convivir con el nativo, el CRUD lo hace el nativo con su propio ability).
@@ -14,15 +25,6 @@ All notable changes to `strapi-plugin-mcp` are documented here. Format follows [
 - **Bridge al MCP nativo (`coexistence:"extend-native"`).** El plugin ahora puede registrar sus diferenciadores **dentro del servidor MCP nativo** (`strapi.ai.mcp`), de modo que el endpoint único `/mcp` sirve el CRUD del nativo **+** schema authoring + visual layout + media/graphql del plugin — un solo endpoint, una sola auth (admin tokens del nativo). Se activa con `coexistence:"extend-native"`. El registro corre en la fase `register` (antes de que el nativo arranque) e incluye un adaptador JSON-Schema→Zod (el SDK del nativo exige Zod) y un wrapper de handler que mapea al contexto del nativo. No se publican: `contentOps` (lo hace el nativo) ni las tools de audit (requieren super-admin vía roles, ausentes en el contexto del nativo) — esas siguen en el endpoint standalone. Las tools bridged se marcan `devModeOnly` (el nativo lo exige; encaja con que el schema authoring es dev-only). Nueva dep `zod` (resuelta a la misma instancia que el SDK nativo). Verificado end-to-end en Strapi 5.48.1: `/mcp` pasó a exponer 41 tools (24 nativas + 17 del plugin) y las bridged ejecutan correctamente (`__health`, `get_visual_layout`). Módulo nuevo: `server/services/native-bridge.ts`.
 - **Coexistencia automática con el MCP nativo (`coexistence` mode).** Nuevo setting `coexistence` (`"auto"` default | `"standalone"` | `"extend-native"`, override `MCP_COEXISTENCE`). En `"auto"`, si se detecta el MCP nativo de Strapi sirviendo (Strapi ≥5.47 **y** `server.mcp.enabled === true`), el plugin **auto-suprime `contentOps`** para no exponer tools de CRUD duplicadas — sin tener que poner `contentOps:false` a mano. Vías de escape: `coexistence:"standalone"` o `CONTENT_OPS_ENABLED=true`. Loguea una línea (una vez por proceso) explicando la decisión. Verificado end-to-end en un Strapi 5.48.1 con el nativo activo: el plugin pasó a exponer solo sus 19 diferenciadores, cero CRUD, sin tocar `contentOps`. Nuevas funciones en `feature-flags.ts`: `isNativeMcpActive`, `resolveCoexistence`, `applyCoexistence`, `resolveRuntimeFlags`, `versionGte` (todas testeadas). `extend-native` queda reservado para registrar las tools en `strapi.ai.mcp` (futuro).
 - **Config-driven tool gating + `contentOps` toggle (coexistencia con el MCP nativo de Strapi 5.47+).** El gating de categorías de tools dejó de vivir exclusivamente en `process.env` y ahora se configura en `config/plugins.ts` bajo `config: { contentOps, schemaAuthoring, upload, graphql }`, con las env vars como override. Precedencia: default del plugin → config → env var. El flag nuevo `contentOps` (default `true`, override `CONTENT_OPS_ENABLED`) permite **apagar las tools de CRUD de entries** cuando el MCP nativo de Strapi maneje el contenido, para que el LLM no vea tools duplicadas (`find_entries` vs `list`, `create_entry` vs `create`). Con `contentOps: false`, el plugin expone solo sus diferenciadores: schema authoring, visual layout, media, graphql y audit. Defaults idénticos al comportamiento previo, así que los deployments existentes no cambian. Nuevos: `server/config/index.ts` (default + validator) y `server/services/feature-flags.ts` (resolución con precedencia, testeado).
-
-### Planned
-- Log noise cleanup: 401/403/429 from the auth policy and rate-limit middleware should log as a single-line `warn`, not `error` with a stack trace. Deferred from 0.6.0 — the fix touches the security-critical `require-api-token` policy and wasn't worth the regression risk for a cosmetic gain.
-- Redis backend for multi-instance rate limiting
-- `delete_content_type` with multi-step confirmation
-- i18n-specific tools
-- Admin UI panel for browsing the audit log
-- Extend `strategy` resolution to `create_content_type` and `add_field_to_schema`
-- Investigate the `pnpm publish` 404 bug (granular token) so npm isn't the only working publish path
 
 ## [0.6.2] - 2026-05-21
 
