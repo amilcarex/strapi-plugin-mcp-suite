@@ -4,6 +4,10 @@ All notable changes to `strapi-plugin-mcp` are documented here. Format follows [
 
 ## [Unreleased]
 
+### Added
+
+- **Config-driven tool gating + `contentOps` toggle (coexistencia con el MCP nativo de Strapi 5.47+).** El gating de categorías de tools dejó de vivir exclusivamente en `process.env` y ahora se configura en `config/plugins.ts` bajo `config: { contentOps, schemaAuthoring, upload, graphql }`, con las env vars como override. Precedencia: default del plugin → config → env var. El flag nuevo `contentOps` (default `true`, override `CONTENT_OPS_ENABLED`) permite **apagar las tools de CRUD de entries** cuando el MCP nativo de Strapi maneje el contenido, para que el LLM no vea tools duplicadas (`find_entries` vs `list`, `create_entry` vs `create`). Con `contentOps: false`, el plugin expone solo sus diferenciadores: schema authoring, visual layout, media, graphql y audit. Defaults idénticos al comportamiento previo, así que los deployments existentes no cambian. Nuevos: `server/config/index.ts` (default + validator) y `server/services/feature-flags.ts` (resolución con precedencia, testeado).
+
 ### Planned
 - Log noise cleanup: 401/403/429 from the auth policy and rate-limit middleware should log as a single-line `warn`, not `error` with a stack trace. Deferred from 0.6.0 — the fix touches the security-critical `require-api-token` policy and wasn't worth the regression risk for a cosmetic gain.
 - Redis backend for multi-instance rate limiting

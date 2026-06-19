@@ -6,6 +6,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import type { ToolDefinition } from "./tools/types";
+import { PLUGIN_NAME, PLUGIN_VERSION } from "../plugin-meta";
+import { resolveFeatureFlags } from "./feature-flags";
 import { schemaAuthoringTools } from "./tools/schema-authoring";
 import { contentOpsTools } from "./tools/content-ops";
 import { layoutOpsTools } from "./tools/layout-ops";
@@ -19,14 +21,19 @@ import { logOperation } from "./audit/logger";
 /**
  * Construye una instancia MCP Server con las tools registradas.
  *
- * Gating (todos opt-in, default oculto):
- *   - SCHEMA_AUTHORING_ENABLED=true → expone las 7 tools de schema authoring.
- *     Razón: escribir al filesystem de `src/api` / `src/components` desde un
- *     MCP no debería ser silently-on. El dev decide.
- *   - UPLOAD_ENABLED=true → expone las 6 tools de upload (media library).
- *     Razón: si no hay provider configurado (S3/Cloudinary/etc.), uploads tiran.
- *   - GRAPHQL_ENABLED=true → expone las 3 tools de GraphQL.
- *     Razón: @strapi/plugin-graphql es opt-in en Strapi v5, puede no estar instalado.
+ * Gating (config-driven desde v0.7.0; ver `services/feature-flags.ts`).
+ * Precedencia: default → config del plugin (`config/plugins.ts`) → env override.
+ *
+ *   - contentOps (default true) → CRUD de entries + publish/unpublish.
+ *     Ponlo en `false` cuando el MCP nativo de Strapi 5.47+ maneje el CRUD,
+ *     para no exponer tools duplicadas. Override: CONTENT_OPS_ENABLED.
+ *   - schemaAuthoring (default false) → tools que escriben schema al filesystem
+ *     de `src/api` / `src/components`. No debería ser silently-on: el dev decide.
+ *     Override: SCHEMA_AUTHORING_ENABLED.
+ *   - upload (default false) → tools de media library. Si no hay provider
+ *     configurado (S3/Cloudinary/etc.), los uploads tiran. Override: UPLOAD_ENABLED.
+ *   - graphql (default false) → tools de GraphQL. @strapi/plugin-graphql es opt-in
+ *     en Strapi v5 y puede no estar instalado. Override: GRAPHQL_ENABLED.
  *
  *   - process.env.NODE_ENV=production → si las authoring tools están enabled,
  *     siguen apareciendo en list_tools pero los writers refusan en runtime
@@ -51,8 +58,8 @@ export interface McpServerContext {
 export function createMcpServer(strapi: Core.Strapi, ctx: McpServerContext = {}) {
   const server = new Server(
     {
-      name: "strapi-mcp-suite",
-      version: "0.6.2",
+      name: PLUGIN_NAME,
+      version: PLUGIN_VERSION,
     },
     {
       capabilities: { tools: {} },
@@ -61,26 +68,33 @@ export function createMcpServer(strapi: Core.Strapi, ctx: McpServerContext = {})
 
   const tools: ToolDefinition[] = [];
 
+  // Flags resueltos: default → config del plugin → env override.
+  const flags = resolveFeatureFlags(strapi);
+
   // Schema authoring: opt-in.
-  const schemaAuthoringEnabled = process.env.SCHEMA_AUTHORING_ENABLED === "true";
-  if (schemaAuthoringEnabled) {
+  if (flags.schemaAuthoring) {
     tools.push(...schemaAuthoringTools);
   }
 
-  tools.push(...contentOpsTools);
+  // Content ops (CRUD): on por default; apagable para convivir con el MCP nativo.
+  if (flags.contentOps) {
+    tools.push(...contentOpsTools);
+  }
+
+  // Siempre disponibles: son los diferenciadores que el nativo no expone.
   tools.push(...layoutOpsTools);
   tools.push(...registryTools);
   tools.push(...healthTools);
   tools.push(...auditTools);
 
   // Upload tools: opt-in.
-  if (process.env.UPLOAD_ENABLED === "true") {
+  if (flags.upload) {
     tools.push(...uploadTools);
   }
 
   // GraphQL tools: opt-in (también requiere @strapi/plugin-graphql instalado;
   // si no, los handlers tiran error claro al invocarse).
-  if (process.env.GRAPHQL_ENABLED === "true") {
+  if (flags.graphql) {
     tools.push(...graphqlTools);
   }
 

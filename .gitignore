@@ -2,6 +2,9 @@
 dist/
 dist-tests/
 
+# Pack artifacts (pnpm pack)
+*.tgz
+
 # Dependencies
 node_modules/
 
