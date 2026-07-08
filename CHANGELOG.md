@@ -13,6 +13,12 @@ All notable changes to `strapi-plugin-mcp` are documented here. Format follows [
 - Extend `strategy` resolution to `create_content_type` and `add_field_to_schema`
 - Field-level / condition-based permission parity with the native MCP (current enforcement is token-type + custom-action level)
 
+## [0.7.1] - 2026-07-08
+
+### Added
+
+- **`customTokenWrite` — política de escritura para custom tokens.** Nuevo setting (`"strict"` default | `"endpoint"`, override `MCP_CUSTOM_TOKEN_WRITE`). En `"endpoint"`, un custom token que ya llegó al endpoint (tiene `stream.handle`) puede escribir en **cualquier** content-type vía content-ops, sin necesitar el permiso `${uid}.${action}` de Strapi. Resuelve el caso —frecuente en proyectos con muchos content-types— en que Strapi **congela los permisos del token al crearlo**: los content-types agregados después nunca quedan incluidos, y a veces **ni siquiera son otorgables** (si el CT no expone rutas content-api, el permiso no existe en el árbol de tokens, así que ni un token nuevo lo cubre). El plugin escribe vía `strapi.documents()` (por debajo de la capa de rutas), así que puede crear esas entries; el único bloqueo era nuestro propio guard. `read-only` sigue **bloqueado** y `full-access` sin cambios en ambas políticas. Default `strict` → los deployments existentes no cambian. Nuevo `resolveCustomWritePolicy` en `feature-flags.ts` (testeado).
+
 ## [0.7.0] - 2026-06-18
 
 ### Security

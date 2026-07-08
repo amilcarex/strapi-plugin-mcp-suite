@@ -197,6 +197,45 @@ export function resolveCoexistence(strapi: Core.Strapi): CoexistenceMode {
   return mode;
 }
 
+/* ─── Política de escritura para custom tokens (0.7.1) ──────────────────────── */
+
+/**
+ * Cómo se autoriza la escritura de content-ops para un custom token:
+ *   - "strict" (default): el token debe tener el permiso `${uid}.${action}` de
+ *     Strapi. Máxima granularidad, pero hay que re-editar el token cada vez que
+ *     se agrega un content-type (Strapi congela los permisos al crear el token).
+ *   - "endpoint": cualquier custom token que llegó al endpoint (ya tiene
+ *     `stream.handle`) puede escribir en CUALQUIER content-type — escalable, sin
+ *     re-tocar el token por cada CT nuevo. Es una decisión explícita del proyecto.
+ * En ambos: full-access escribe todo, read-only queda BLOQUEADO (blindaje duro).
+ */
+export type CustomWritePolicy = "strict" | "endpoint";
+export const CUSTOM_WRITE_POLICIES: CustomWritePolicy[] = ["strict", "endpoint"];
+export const DEFAULT_CUSTOM_WRITE: CustomWritePolicy = "strict";
+export const CUSTOM_WRITE_ENV = "MCP_CUSTOM_TOKEN_WRITE";
+
+/** Lee la política de escritura de custom tokens: default → config → env override. */
+export function resolveCustomWritePolicy(strapi: Core.Strapi): CustomWritePolicy {
+  let mode: CustomWritePolicy = DEFAULT_CUSTOM_WRITE;
+  try {
+    const plugin: any = strapi.plugin("strapi-mcp-suite");
+    const fromCfg =
+      typeof plugin?.config === "function"
+        ? plugin.config("customTokenWrite")
+        : (strapi.config as any)?.get?.("plugin::strapi-mcp-suite.customTokenWrite");
+    if (typeof fromCfg === "string" && (CUSTOM_WRITE_POLICIES as string[]).includes(fromCfg)) {
+      mode = fromCfg as CustomWritePolicy;
+    }
+  } catch {
+    /* noop */
+  }
+  const envMode = process.env[CUSTOM_WRITE_ENV];
+  if (typeof envMode === "string" && (CUSTOM_WRITE_POLICIES as string[]).includes(envMode)) {
+    mode = envMode as CustomWritePolicy;
+  }
+  return mode;
+}
+
 /**
  * Aplica la política de coexistencia sobre los flags. Función pura.
  *

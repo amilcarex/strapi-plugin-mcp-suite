@@ -49,19 +49,31 @@ export default {
   'strapi-mcp-suite': {
     enabled: true,
     config: {
-      coexistence: 'auto',     // 'auto' | 'standalone' | 'extend-native'
-      contentOps: true,        // CRUD tools (auto-suppressed when coexisting)
+      coexistence: 'auto',       // 'auto' | 'standalone' | 'extend-native'
+      contentOps: true,          // CRUD tools (auto-suppressed when coexisting)
       schemaAuthoring: false,
       upload: false,
       graphql: false,
+      customTokenWrite: 'strict', // 'strict' | 'endpoint' — see below
     },
   },
 };
 ```
 
+**`customTokenWrite`** controls how a *custom* API token is authorized to write via
+content-ops:
+- **`strict`** (default): the token must hold the matching `${uid}.${action}` Strapi permission.
+  Strapi freezes a token's permissions at creation time, so content-types added later aren't
+  covered — and if a content-type doesn't expose content-api routes, the permission isn't even
+  grantable.
+- **`endpoint`**: any custom token that reached the endpoint (it already has `stream.handle`) may
+  write to **any** content-type — scalable, no per-type re-granting. The plugin writes through
+  `strapi.documents()`, below the route layer, so it works even for content-types without
+  content-api routes. `read-only` tokens stay blocked in both modes; `full-access` is unchanged.
+
 Gating is **config-driven** (precedence: built-in defaults → `config/plugins.ts` → env override).
 The env vars (`CONTENT_OPS_ENABLED`, `SCHEMA_AUTHORING_ENABLED`, `UPLOAD_ENABLED`, `GRAPHQL_ENABLED`,
-`MCP_COEXISTENCE`) still work and win over config.
+`MCP_COEXISTENCE`, `MCP_CUSTOM_TOKEN_WRITE`) still work and win over config.
 
 ---
 
