@@ -6,6 +6,7 @@ import {
   DEFAULT_POPULATE_DEPTH,
   MAX_POPULATE_DEPTH,
 } from "../populate/deep-populate";
+import { resolveCustomWritePolicy } from "../feature-flags";
 
 /**
  * Tools genéricas de gestión de contenido. Delegan a `strapi.documents()` para
@@ -38,9 +39,14 @@ function assertContentType(strapi: any, uid: string): any {
  * del token. Este guard lo cierra:
  *   - full-access  → permite.
  *   - read-only    → BLOQUEA toda mutación (fail-closed).
- *   - custom       → exige la action correspondiente en los permisos del token
- *                    (si se pueden resolver; si no, permite con warning para no
- *                    romper setups legítimos — read-only sigue siendo el blindaje duro).
+ *   - custom       → depende de `customTokenWrite` (config, default "strict"):
+ *                      · "strict"   → exige la action `${uid}.${action}` en los
+ *                                     permisos del token (si se resuelven; si no,
+ *                                     permite con warning).
+ *                      · "endpoint" → permite escribir en cualquier content-type
+ *                                     (el token ya llegó al endpoint con `stream.handle`).
+ *                                     Escalable: no hay que re-editar el token por cada
+ *                                     CT nuevo. Ver `resolveCustomWritePolicy`.
  *   - sin token / tipo desconocido → BLOQUEA (fail-closed).
  *
  * Solo aplica a content-ops servidas por el endpoint standalone. Cuando se
@@ -74,6 +80,11 @@ export async function assertCanMutate(
     );
   }
   if (token.type === "custom") {
+    // Política "endpoint": el token ya pasó require-api-token (tiene stream.handle),
+    // así que se le permite escribir cualquier content-type sin re-editar sus
+    // permisos por cada CT nuevo. read-only sigue bloqueado arriba.
+    if (resolveCustomWritePolicy(strapi) === "endpoint") return;
+
     let actions: string[] | null = null; // null = no se pudieron resolver
     try {
       const svc = strapi.service?.("admin::api-token");
