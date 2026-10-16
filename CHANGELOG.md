@@ -13,6 +13,14 @@ All notable changes to `strapi-plugin-mcp` are documented here. Format follows [
 - Extend `strategy` resolution to `create_content_type` and `add_field_to_schema`
 - Field-level / condition-based permission parity with the native MCP (current enforcement is token-type + custom-action level)
 
+## [0.7.2] - 2026-10-16
+
+### Documentation
+
+- README (EN + ES): the built-in tools table now matches the code — **38 tools** (it said "33 total"). Added the missing `discard_draft` to content ops, and `propose_schema_strategy`, `suggest_reusable_atoms`, `add_fields_to_schema` and `modify_schema` to schema authoring (**11 tools**, the table and the `SCHEMA_AUTHORING_ENABLED` row said 7).
+- README (EN + ES): content ops are no longer described as "always available". Since 0.7.0 they are gated by `contentOps` / `CONTENT_OPS_ENABLED` and suppressed in `auto` coexistence mode when the native MCP is serving. `CONTENT_OPS_ENABLED` added to the environment variables table.
+- No code changes.
+
 ## [0.7.1] - 2026-07-08
 
 ### Added

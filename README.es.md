@@ -79,13 +79,13 @@ env). Las env vars (`CONTENT_OPS_ENABLED`, `SCHEMA_AUTHORING_ENABLED`, `UPLOAD_E
 
 ## Features
 
-### Tools built-in (33 en total, agrupadas por capacidad)
+### Tools built-in (38 en total, agrupadas por capacidad)
 
 | Categoría | Tools | Notas |
 |---|---|---|
-| **Content ops** | `list_content_types`, `get_content_type_schema`, `find_entries`, `get_entry`, `create_entry`, `update_entry`, `delete_entry`, `publish_entry`, `unpublish_entry` | CRUD genérico sobre cualquier content-type. Delega a `strapi.documents()`. Siempre disponibles. |
+| **Content ops** | `list_content_types`, `get_content_type_schema`, `find_entries`, `get_entry`, `create_entry`, `update_entry`, `delete_entry`, `publish_entry`, `unpublish_entry`, `discard_draft` | CRUD genérico sobre cualquier content-type. Delega a `strapi.documents()`. Habilitadas por defecto (`contentOps` / `CONTENT_OPS_ENABLED`); en modo de coexistencia `auto` se suprimen cuando el MCP nativo está sirviendo. |
 | **Visual layout** | `get_visual_layout`, `set_field_layout`, `set_field_metadata`, `set_view_settings` | Modifica la config del Content Manager (widths, labels, orden). Guardado en `strapi_core_store_settings`. **No requiere reinicio.** |
-| **Schema authoring** | `list_existing_schemas`, `read_schema`, `validate_schema_proposal`, `create_component`, `create_content_type`, `add_field_to_schema`, `delete_field_from_schema` | Escribe schemas `.json` y stubs `.ts` al filesystem. Requiere reinicio de Strapi para que los schemas nuevos se carguen. **Gated por `SCHEMA_AUTHORING_ENABLED=true`.** Rechazado en producción. |
+| **Schema authoring** | `list_existing_schemas`, `read_schema`, `validate_schema_proposal`, `propose_schema_strategy`, `suggest_reusable_atoms`, `create_component`, `create_content_type`, `add_field_to_schema`, `add_fields_to_schema`, `modify_schema`, `delete_field_from_schema` | Escribe schemas `.json` y stubs `.ts` al filesystem. Requiere reinicio de Strapi para que los schemas nuevos se carguen; `add_fields_to_schema` y `modify_schema` agrupan varios cambios de forma atómica en un solo reinicio. `validate_schema_proposal`, `propose_schema_strategy` y `suggest_reusable_atoms` son de análisis y no escriben nada. **Gated por `SCHEMA_AUTHORING_ENABLED=true`.** Rechazado en producción. |
 | **Media / upload** | `list_media`, `get_media`, `upload_media_from_url`, `update_media_metadata`, `delete_media`, `link_media_to_entry` | Uploads basados en URL. Funciona con cualquier provider de Strapi (local, S3, Cloudinary, R2, etc.). **Gated por `UPLOAD_ENABLED=true`.** Con protección SSRF. |
 | **GraphQL** | `graphql_introspect`, `graphql_query`, `graphql_generate_query` | Testea queries GraphQL, introspecciona el schema, genera queries desde un UID de content-type. Mutations requieren `allow_mutations:true` explícito. **Gated por `GRAPHQL_ENABLED=true`** y requiere `@strapi/plugin-graphql` instalado. |
 | **Diagnostics** | `__health`, `__list_registered_tools` | Ping de salud (úsalo después de schema-authoring para confirmar que Strapi reinició) + inventario del registry. Siempre disponibles. |
@@ -218,7 +218,8 @@ lista completa anotada. Referencia rápida:
 
 | Variable | Default | Propósito |
 |---|---|---|
-| `SCHEMA_AUTHORING_ENABLED` | `false` | Expone las 7 tools de schema-authoring (escriben schemas `.json` al filesystem). Rechazado si `NODE_ENV` es production-ish. |
+| `CONTENT_OPS_ENABLED` | `true` | Expone las 10 tools de content ops. Ponlo en `false` si el MCP nativo de Strapi maneja el CRUD. |
+| `SCHEMA_AUTHORING_ENABLED` | `false` | Expone las 11 tools de schema-authoring (escriben schemas `.json` al filesystem). Rechazado si `NODE_ENV` es production-ish. |
 | `UPLOAD_ENABLED` | `false` | Expone las 6 tools del media library. Requiere un upload provider configurado. |
 | `GRAPHQL_ENABLED` | `false` | Expone las 3 tools de GraphQL. Requiere `@strapi/plugin-graphql` instalado. |
 | `MCP_RATE_LIMIT_PER_MIN` | `60` | Rate limit per-token (sliding window). |
